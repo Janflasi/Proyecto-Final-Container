@@ -9,10 +9,13 @@
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>🍻 Container Bar - Historial de Ventas</h1>
-            <p>Gestiona y analiza todas las ventas de tu container bar con reportes detallados</p>
-        </div>
+      <div class="header">
+    <div class="header-title">
+        <img src="/assets/unnamed.png" alt="Container Bar" class="header-logo">
+        <h1>Container Bar - Historial de Ventas</h1>
+    </div>
+    <p>Gestiona y analiza todas las ventas de tu container bar con reportes detallados</p>
+</div>
 
         <!-- Filtros -->
         <div class="controls-section">

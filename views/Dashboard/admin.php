@@ -11,8 +11,9 @@
     <!-- Sidebar -->
     <nav class="sidebar">
         <div class="logo">
-            <h1>🍺 Bar Container</h1>
-        </div>
+    <img src="/assets/unnamed.png" alt="Bar Container" class="logo-img">
+    <h1>Bar Container</h1>
+</div>
         
         <div class="nav-menu">
             <div class="nav-section">

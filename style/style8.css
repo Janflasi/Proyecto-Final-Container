@@ -411,3 +411,21 @@
         .loading.show {
             display: block;
         }
+.header-logo {
+    max-height: 80px;
+    width: auto;
+    margin-bottom: 10px;
+}
+
+/* Para la opción 2 */
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    justify-content: center;
+}
+
+.header-title .header-logo {
+    max-height: 50px;
+    margin-bottom: 0;
+}

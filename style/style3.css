@@ -433,4 +433,20 @@
         .section.active {
             display: block;
         }
-    
+    .logo img {
+    max-height: 60px; /* ajusta según necesites */
+    width: auto;
+    object-fit: contain;
+}
+
+/* Si usas logo + texto */
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo-img {
+    max-height: 50px;
+    width: auto;
+}

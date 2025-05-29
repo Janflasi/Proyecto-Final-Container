@@ -505,10 +505,10 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="fas fa-crown"></i>
-                BESTIA BAR
-            </a>
+           <a class="navbar-brand d-flex align-items-center" href="/">
+    <img src="/assets/unnamed.png" alt="El Container Bar" height="35" class="me-2">
+    EL CONTAINER BAR
+</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>

@@ -9,7 +9,7 @@
         </div>
         
         <h1 class="hero-title">
-            Bienvenido a <span class="brand-highlight">BESTIA BAR</span>
+            Bienvenido a <span class="brand-highlight">EL CONTAINER BAR</span>
         </h1>
         
         <p class="hero-description">

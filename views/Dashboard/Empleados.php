@@ -10,10 +10,11 @@
 <body>
     <div class="container">
         <!-- Header -->
-        <div class="header">
-            <h1>🍺 CONTAINER BAR</h1>
-            <p>Sistema de Gestión de Empleados</p>
-        </div>
+     <div class="header">
+    <img src="/assets/unnamed.png" alt="Container Bar" class="header-logo">
+    <h1>CONTAINER BAR</h1>
+    <p>Sistema de Gestión de Empleados</p>
+</div>
 
         <!-- Stats Grid -->
         <div class="stats-grid">

@@ -5,7 +5,7 @@ require_once __DIR__ . '/../Router.php';
 class MeseroController {
 
     public static function index(Router $router) {
-        $router->render('mesero/index', [
+        $router->render('Mesero/mesero', [
             "title" => "Panel Mesero"
         ]);
     }
