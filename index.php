@@ -50,6 +50,13 @@ $router->post('/admin/productos', [DashboardController::class, 'createProducto']
 $router->post('/admin/productos/update', [DashboardController::class, 'updateProducto']);
 $router->post('/admin/productos/delete', [DashboardController::class, 'deleteProducto']);
 
+
+// Gestión de Categorías - Agregar estas rutas
+$router->get('/admin/categorias', [DashboardController::class, 'categorias']);
+$router->post('/admin/categorias', [DashboardController::class, 'categorias']); // Para manejar formularios inline
+$router->post('/admin/categorias/create', [DashboardController::class, 'createCategoria']);
+$router->post('/admin/categorias/update', [DashboardController::class, 'updateCategoria']);
+$router->post('/admin/categorias/delete', [DashboardController::class, 'deleteCategoria']);
 // Reportes y Control
 $router->get('/admin/reportes', [DashboardController::class, 'reportes']);
 $router->post('/admin/reportes/generar', [DashboardController::class, 'generarReporte']);

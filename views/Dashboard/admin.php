@@ -334,7 +334,7 @@ $productos_populares = $stmt_productos_populares->fetchAll();
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="#" class="nav-link" onclick="showSection('categorias')">
+                        <a href="admin/categorias" class="nav-link" onclick="showSection('categorias')">
                             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14-7H5a2 2 0 00-2 2v12a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2z"/>
                             </svg>
