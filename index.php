@@ -73,19 +73,25 @@ $router->post('/admin/configuracion', [DashboardController::class, 'updateConfig
 $router->get('/admin/seguridad', [DashboardController::class, 'seguridad']);
 $router->post('/admin/seguridad', [DashboardController::class, 'updateSeguridad']);
 
+
+$router->get('/admin/mesas', [DashboardController::class, 'mesas']);
+$router->post('/admin/seguridad', [DashboardController::class, 'updateSeguridad']);
+
 // ==================== RUTAS DEL MESERO ====================
 
-// Panel del mesero
+// Rutas principales del mesero
 $router->get('/mesero', [MeseroController::class, 'index']);
 $router->get('/mesero/sign', [MeseroController::class, 'sign']);
 $router->post('/mesero/sign', [MeseroController::class, 'processSign']);
-
-// Gestión de mesas y pedidos
 $router->get('/mesero/mesas', [MeseroController::class, 'mesas']);
 $router->get('/mesero/pedidos', [MeseroController::class, 'pedidos']);
-$router->post('/mesero/pedidos', [MeseroController::class, 'crearPedido']);
+$router->post('/mesero/crear-pedido', [MeseroController::class, 'crearPedido']);
 
-// ==================== RUTAS API ====================
+// Rutas AJAX
+$router->post('/mesero/action', [MeseroController::class, 'processAction']);
+$router->get('/mesero/carrito', [MeseroController::class, 'getCarrito']);
+$router->get('/mesero/cuentas', [MeseroController::class, 'getCuentas']);
+$router->get('/mesero/mesas-data', [MeseroController::class, 'getMesas']);
 
 // API para obtener datos en tiempo real
 $router->get('/api/productos', [DashboardController::class, 'getProductosAPI']);

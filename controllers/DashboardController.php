@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../Router.php';
 require_once __DIR__ . '/../config/Conexion.php';
 
+
 class DashboardController {
 
     public static function index(Router $router) {
@@ -206,7 +207,7 @@ class DashboardController {
         ]);
     }
 
-    // GESTIÓN DE PRODUCTOS - FUNCIONES COMPLETAS
+    // GESTIÓN DE PRODUCTOS - FUNCIONES COMPLETAS CON IMAGEN
     public static function productos(Router $router) {
         $database = new Database();
         $pdo = $database->getConnection();
@@ -220,12 +221,12 @@ class DashboardController {
                 
                 switch ($_POST['action']) {
                     case 'add':
-                        $response['success'] = self::addProducto($pdo, $_POST);
+                        $response['success'] = self::addProducto($pdo, $_POST, $_FILES);
                         $response['message'] = $response['success'] ? 'Producto agregado' : 'Error al agregar';
                         break;
                         
                     case 'update':
-                        $response['success'] = self::updateProductoData($pdo, $_POST['id'], $_POST);
+                        $response['success'] = self::updateProductoData($pdo, $_POST['id'], $_POST, $_FILES);
                         $response['message'] = $response['success'] ? 'Producto actualizado' : 'Error al actualizar';
                         break;
                         
@@ -263,7 +264,44 @@ class DashboardController {
         ]);
     }
 
-    // Funciones auxiliares para productos
+    // FUNCIÓN PARA MANEJAR CARGA DE IMAGEN
+    private static function manejarImagenProducto($imagen, $nombre_producto = '') {
+        if (!isset($imagen) || $imagen['error'] !== UPLOAD_ERR_OK) {
+            return null;
+        }
+        
+        // Validar tipo de archivo
+        $tipos_permitidos = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+        if (!in_array($imagen['type'], $tipos_permitidos)) {
+            throw new Exception('Tipo de archivo no permitido. Use JPG, PNG o GIF.');
+        }
+        
+        // Validar tamaño (máximo 5MB)
+        if ($imagen['size'] > 5 * 1024 * 1024) {
+            throw new Exception('El archivo es demasiado grande. Máximo 5MB.');
+        }
+        
+        // Crear directorio si no existe
+        $directorio = __DIR__ . '/../public/images/productos/';
+        if (!file_exists($directorio)) {
+            mkdir($directorio, 0777, true);
+        }
+        
+        // Generar nombre único para el archivo
+        $extension = pathinfo($imagen['name'], PATHINFO_EXTENSION);
+        $nombre_limpio = preg_replace('/[^A-Za-z0-9\-]/', '', str_replace(' ', '-', $nombre_producto));
+        $nombre_archivo = $nombre_limpio . '_' . uniqid() . '.' . $extension;
+        $ruta_completa = $directorio . $nombre_archivo;
+        
+        // Mover archivo
+        if (move_uploaded_file($imagen['tmp_name'], $ruta_completa)) {
+            return 'images/productos/' . $nombre_archivo;
+        } else {
+            throw new Exception('Error al subir la imagen.');
+        }
+    }
+
+    // Funciones auxiliares para productos MODIFICADAS PARA IMAGEN
     private static function getProductos($pdo, $categoria = null, $search = null) {
         $sql = "SELECT p.*, c.nombre_categoria FROM productos p JOIN categorias c ON p.id_categoria = c.id_categoria WHERE p.activo = 1";
         $params = [];
@@ -286,18 +324,62 @@ class DashboardController {
         return $pdo->query("SELECT * FROM categorias ORDER BY nombre_categoria")->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    private static function addProducto($pdo, $data) {
-        $stmt = $pdo->prepare("INSERT INTO productos (nombre_producto, precio, stock, id_categoria) VALUES (?, ?, ?, ?)");
-        return $stmt->execute([$data['nombre'], $data['precio'], $data['stock'], $data['categoria']]);
+    private static function addProducto($pdo, $data, $files = null) {
+        try {
+            $imagen_ruta = null;
+            
+            // Manejar imagen si se subió
+            if ($files && isset($files['imagen']) && $files['imagen']['error'] !== UPLOAD_ERR_NO_FILE) {
+                $imagen_ruta = self::manejarImagenProducto($files['imagen'], $data['nombre']);
+            }
+            
+            $stmt = $pdo->prepare("INSERT INTO productos (nombre_producto, precio, stock, id_categoria, imagen) VALUES (?, ?, ?, ?, ?)");
+            return $stmt->execute([$data['nombre'], $data['precio'], $data['stock'], $data['categoria'], $imagen_ruta]);
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
 
-    private static function updateProductoData($pdo, $id, $data) {
-        $stmt = $pdo->prepare("UPDATE productos SET nombre_producto = ?, precio = ?, stock = ?, id_categoria = ? WHERE id_producto = ?");
-        return $stmt->execute([$data['nombre'], $data['precio'], $data['stock'], $data['categoria'], $id]);
+    private static function updateProductoData($pdo, $id, $data, $files = null) {
+        try {
+            // Obtener imagen actual
+            $stmt = $pdo->prepare("SELECT imagen FROM productos WHERE id_producto = ?");
+            $stmt->execute([$id]);
+            $producto_actual = $stmt->fetch(PDO::FETCH_ASSOC);
+            $imagen_ruta = $producto_actual['imagen'];
+            
+            // Manejar nueva imagen si se subió
+            if ($files && isset($files['imagen']) && $files['imagen']['error'] !== UPLOAD_ERR_NO_FILE) {
+                // Eliminar imagen anterior si existe
+                if ($imagen_ruta && file_exists(__DIR__ . '/../public/' . $imagen_ruta)) {
+                    unlink(__DIR__ . '/../public/' . $imagen_ruta);
+                }
+                $imagen_ruta = self::manejarImagenProducto($files['imagen'], $data['nombre']);
+            }
+            
+            $stmt = $pdo->prepare("UPDATE productos SET nombre_producto = ?, precio = ?, stock = ?, id_categoria = ?, imagen = ? WHERE id_producto = ?");
+            return $stmt->execute([$data['nombre'], $data['precio'], $data['stock'], $data['categoria'], $imagen_ruta, $id]);
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
 
     private static function deleteProductoData($pdo, $id) {
-        return $pdo->prepare("UPDATE productos SET activo = 0 WHERE id_producto = ?")->execute([$id]);
+        try {
+            // Obtener imagen antes de eliminar
+            $stmt = $pdo->prepare("SELECT imagen FROM productos WHERE id_producto = ?");
+            $stmt->execute([$id]);
+            $producto = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Eliminar imagen si existe
+            if ($producto && $producto['imagen'] && file_exists(__DIR__ . '/../public/' . $producto['imagen'])) {
+                unlink(__DIR__ . '/../public/' . $producto['imagen']);
+            }
+            
+            return $pdo->prepare("UPDATE productos SET activo = 0 WHERE id_producto = ?")->execute([$id]);
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
 
     private static function getProductoById($pdo, $id) {
@@ -397,21 +479,43 @@ class DashboardController {
         ]);
     }
 
-    // Métodos auxiliares para categorías
+    // Métodos auxiliares para categorías - CORREGIDOS PARA EVITAR DUPLICADOS
     private static function procesarAgregarCategoria($pdo, $data) {
         $nombre = trim($data['nombre'] ?? '');
         $descripcion = trim($data['descripcion'] ?? '');
         
-        if (!empty($nombre)) {
-            try {
-                $stmt = $pdo->prepare("INSERT INTO categorias (nombre_categoria, descripcion) VALUES (?, ?)");
-                $stmt->execute([$nombre, $descripcion]);
-                return ['mensaje' => 'Categoría agregada exitosamente', 'tipo' => 'success'];
-            } catch(PDOException $e) {
-                return ['mensaje' => 'Error al agregar categoría: ' . $e->getMessage(), 'tipo' => 'error'];
-            }
-        } else {
+        if (empty($nombre)) {
             return ['mensaje' => 'El nombre de la categoría es obligatorio', 'tipo' => 'error'];
+        }
+        
+        try {
+            // Verificar si ya existe una categoría con ese nombre (case insensitive)
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM categorias WHERE UPPER(nombre_categoria) = UPPER(?)");
+            $stmt_check->execute([$nombre]);
+            $existe = $stmt_check->fetchColumn();
+            
+            if ($existe > 0) {
+                return ['mensaje' => 'Ya existe una categoría con el nombre "' . $nombre . '"', 'tipo' => 'error'];
+            }
+            
+            // Si no existe, proceder a insertar
+            $stmt = $pdo->prepare("INSERT INTO categorias (nombre_categoria, descripcion) VALUES (?, ?)");
+            $resultado = $stmt->execute([$nombre, $descripcion]);
+            
+            if ($resultado) {
+                return ['mensaje' => 'Categoría agregada exitosamente', 'tipo' => 'success'];
+            } else {
+                return ['mensaje' => 'Error al insertar la categoría', 'tipo' => 'error'];
+            }
+            
+        } catch(PDOException $e) {
+            // Verificar si es error de duplicado específicamente
+            if ($e->getCode() == 23000 && strpos($e->getMessage(), 'Duplicate entry') !== false) {
+                return ['mensaje' => 'Ya existe una categoría con ese nombre. Por favor, elige otro nombre.', 'tipo' => 'error'];
+            }
+            return ['mensaje' => 'Error en la base de datos: ' . $e->getMessage(), 'tipo' => 'error'];
+        } catch(Exception $e) {
+            return ['mensaje' => 'Error inesperado: ' . $e->getMessage(), 'tipo' => 'error'];
         }
     }
 
@@ -420,16 +524,38 @@ class DashboardController {
         $nombre = trim($data['nombre'] ?? '');
         $descripcion = trim($data['descripcion'] ?? '');
         
-        if (!empty($nombre) && !empty($id)) {
-            try {
-                $stmt = $pdo->prepare("UPDATE categorias SET nombre_categoria = ?, descripcion = ? WHERE id_categoria = ?");
-                $stmt->execute([$nombre, $descripcion, $id]);
-                return ['mensaje' => 'Categoría actualizada exitosamente', 'tipo' => 'success'];
-            } catch(PDOException $e) {
-                return ['mensaje' => 'Error al actualizar categoría: ' . $e->getMessage(), 'tipo' => 'error'];
+        if (empty($nombre) || empty($id)) {
+            return ['mensaje' => 'El nombre de la categoría y el ID son obligatorios', 'tipo' => 'error'];
+        }
+        
+        try {
+            // Verificar si ya existe otra categoría con ese nombre (excluyendo la actual, case insensitive)
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM categorias WHERE UPPER(nombre_categoria) = UPPER(?) AND id_categoria != ?");
+            $stmt_check->execute([$nombre, $id]);
+            $existe = $stmt_check->fetchColumn();
+            
+            if ($existe > 0) {
+                return ['mensaje' => 'Ya existe otra categoría con el nombre "' . $nombre . '"', 'tipo' => 'error'];
             }
-        } else {
-            return ['mensaje' => 'El nombre de la categoría es obligatorio', 'tipo' => 'error'];
+            
+            // Si no existe conflicto, proceder a actualizar
+            $stmt = $pdo->prepare("UPDATE categorias SET nombre_categoria = ?, descripcion = ? WHERE id_categoria = ?");
+            $resultado = $stmt->execute([$nombre, $descripcion, $id]);
+            
+            if ($resultado) {
+                return ['mensaje' => 'Categoría actualizada exitosamente', 'tipo' => 'success'];
+            } else {
+                return ['mensaje' => 'Error al actualizar la categoría', 'tipo' => 'error'];
+            }
+            
+        } catch(PDOException $e) {
+            // Verificar si es error de duplicado específicamente
+            if ($e->getCode() == 23000 && strpos($e->getMessage(), 'Duplicate entry') !== false) {
+                return ['mensaje' => 'Ya existe otra categoría con ese nombre. Por favor, elige otro nombre.', 'tipo' => 'error'];
+            }
+            return ['mensaje' => 'Error en la base de datos: ' . $e->getMessage(), 'tipo' => 'error'];
+        } catch(Exception $e) {
+            return ['mensaje' => 'Error inesperado: ' . $e->getMessage(), 'tipo' => 'error'];
         }
     }
 
@@ -520,6 +646,11 @@ class DashboardController {
     public static function reportes(Router $router) {
         $router->render('dashboard/reportes_control', [
             "title" => "Reportes y Control"
+        ]);
+    }
+    public static function mesas(Router $router) {
+        $router->render('dashboard/admin_mesas', [
+            "title" => "Mesas"
         ]);
     }
 

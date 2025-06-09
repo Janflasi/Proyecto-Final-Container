@@ -1,3 +1,144 @@
+<?php
+session_start();
+// Configuración de base de datos
+$host = 'localhost';
+$dbname = 'container_bar';
+$username = 'root';
+$password = '';
+
+try {
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch(PDOException $e) {
+    die("Error de conexión: " . $e->getMessage());
+}
+
+// Funciones PHP
+function obtenerProductos($pdo) {
+    $stmt = $pdo->prepare("SELECT p.*, c.nombre_categoria FROM productos p JOIN categorias c ON p.id_categoria = c.id_categoria WHERE p.activo = 1 ORDER BY c.nombre_categoria, p.nombre_producto");
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function obtenerMesas($pdo) {
+    $stmt = $pdo->prepare("SELECT * FROM mesas ORDER BY numero_mesa");
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function obtenerCarrito($pdo, $id_mesa, $id_usuario) {
+    $stmt = $pdo->prepare("SELECT c.*, p.nombre_producto FROM carrito c JOIN productos p ON c.id_producto = p.id_producto WHERE c.id_mesa = ? AND c.id_usuario = ?");
+    $stmt->execute([$id_mesa, $id_usuario]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function agregarAlCarrito($pdo, $id_mesa, $id_usuario, $id_producto) {
+    $stmt = $pdo->prepare("SELECT precio FROM productos WHERE id_producto = ?");
+    $stmt->execute([$id_producto]);
+    $producto = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    $stmt = $pdo->prepare("SELECT * FROM carrito WHERE id_mesa = ? AND id_usuario = ? AND id_producto = ?");
+    $stmt->execute([$id_mesa, $id_usuario, $id_producto]);
+    
+    if ($stmt->rowCount() > 0) {
+        $stmt = $pdo->prepare("UPDATE carrito SET cantidad = cantidad + 1 WHERE id_mesa = ? AND id_usuario = ? AND id_producto = ?");
+        $stmt->execute([$id_mesa, $id_usuario, $id_producto]);
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO carrito (id_mesa, id_usuario, id_producto, cantidad, precio_unitario) VALUES (?, ?, ?, 1, ?)");
+        $stmt->execute([$id_mesa, $id_usuario, $id_producto, $producto['precio']]);
+    }
+}
+
+function modificarCantidadCarrito($pdo, $id_producto, $id_mesa, $id_usuario, $nueva_cantidad) {
+    if ($nueva_cantidad <= 0) {
+        $stmt = $pdo->prepare("DELETE FROM carrito WHERE id_producto = ? AND id_mesa = ? AND id_usuario = ?");
+        $stmt->execute([$id_producto, $id_mesa, $id_usuario]);
+    } else {
+        $stmt = $pdo->prepare("UPDATE carrito SET cantidad = ? WHERE id_producto = ? AND id_mesa = ? AND id_usuario = ?");
+        $stmt->execute([$nueva_cantidad, $id_producto, $id_mesa, $id_usuario]);
+    }
+}
+
+function procesarVenta($pdo, $id_mesa, $id_usuario) {
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT SUM(cantidad * precio_unitario) as total FROM carrito WHERE id_mesa = ? AND id_usuario = ?");
+        $stmt->execute([$id_mesa, $id_usuario]);
+        $total = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+        
+        $stmt = $pdo->prepare("INSERT INTO ventas (id_mesa, id_usuario, total) VALUES (?, ?, ?)");
+        $stmt->execute([$id_mesa, $id_usuario, $total]);
+        $id_venta = $pdo->lastInsertId();
+        
+        $stmt = $pdo->prepare("SELECT * FROM carrito WHERE id_mesa = ? AND id_usuario = ?");
+        $stmt->execute([$id_mesa, $id_usuario]);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        foreach ($items as $item) {
+            $subtotal = $item['cantidad'] * $item['precio_unitario'];
+            $stmt = $pdo->prepare("INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([$id_venta, $item['id_producto'], $item['cantidad'], $item['precio_unitario'], $subtotal]);
+        }
+        
+        $stmt = $pdo->prepare("DELETE FROM carrito WHERE id_mesa = ? AND id_usuario = ?");
+        $stmt->execute([$id_mesa, $id_usuario]);
+        
+        $pdo->commit();
+        return $id_venta;
+    } catch (Exception $e) {
+        $pdo->rollback();
+        throw $e;
+    }
+}
+
+function obtenerVentasPendientes($pdo) {
+    $stmt = $pdo->prepare("SELECT v.*, m.numero_mesa FROM ventas v JOIN mesas m ON v.id_mesa = m.id_mesa WHERE v.estado = 'pendiente' ORDER BY v.fecha_venta DESC");
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function pagarVenta($pdo, $id_venta) {
+    $stmt = $pdo->prepare("UPDATE ventas SET estado = 'completada' WHERE id_venta = ?");
+    $stmt->execute([$id_venta]);
+}
+
+// Procesamiento de solicitudes AJAX
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+    $input = json_decode(file_get_contents('php://input'), true);
+    $action = $input['action'] ?? '';
+    
+    switch ($action) {
+        case 'agregar_producto':
+            agregarAlCarrito($pdo, $input['id_mesa'], $input['id_usuario'], $input['id_producto']);
+            echo json_encode(['success' => true]);
+            break;
+        case 'modificar_cantidad':
+            modificarCantidadCarrito($pdo, $input['id_producto'], $input['id_mesa'], $input['id_usuario'], $input['cantidad']);
+            echo json_encode(['success' => true]);
+            break;
+        case 'procesar_venta':
+            $id_venta = procesarVenta($pdo, $input['id_mesa'], $input['id_usuario']);
+            echo json_encode(['success' => true, 'id_venta' => $id_venta]);
+            break;
+        case 'pagar_venta':
+            pagarVenta($pdo, $input['id_venta']);
+            echo json_encode(['success' => true]);
+            break;
+        case 'limpiar_carrito':
+            $stmt = $pdo->prepare("DELETE FROM carrito WHERE id_mesa = ? AND id_usuario = ?");
+            $stmt->execute([$input['id_mesa'], $input['id_usuario']]);
+            echo json_encode(['success' => true]);
+            break;
+    }
+    exit;
+}
+
+// Obtener datos iniciales
+$productos = obtenerProductos($pdo);
+$mesas = obtenerMesas($pdo);
+$id_usuario = $_SESSION['id_usuario'] ?? 1;
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -8,19 +149,16 @@
     <link rel="stylesheet" href="/style/style9.css">
 </head>
 <body>
-    <!-- Header -->
     <div class="header">
-       <div class="logo-section">
-    <div class="logo-icon">
-        <img src="/assets/unnamed.png" alt="Logo del bar" style="width: 50px; height: 50px;">
-    </div>
-    <div class="logo-text">
-        <h1>BAR CONTAINER</h1>
-        <p>Sistema de Gestión</p>
-    </div>
-</div>
-
-
+        <div class="logo-section">
+            <div class="logo-icon">
+                <img src="/assets/unnamed.png" alt="Logo del bar" style="width: 50px; height: 50px;">
+            </div>
+            <div class="logo-text">
+                <h1>BAR CONTAINER</h1>
+                <p>Sistema de Gestión</p>
+            </div>
+        </div>
         <div class="profile-dropdown">
             <div class="profile-trigger" onclick="toggleProfileMenu()">
                 <div class="profile-avatar">JP</div>
@@ -30,14 +168,11 @@
                 </div>
                 <i class="fas fa-chevron-down" style="color: var(--text-muted); transition: transform 0.3s ease;" id="profileChevron"></i>
             </div>
-            
             <div class="profile-menu" id="profileMenu">
-                
                 <div class="profile-menu-item" onclick="configuraciones()">
                     <i class="fas fa-cog"></i>
                     <span>Configuración</span>
                 </div>
-                
                 <div class="profile-menu-divider"></div>
                 <div class="profile-menu-item" onclick="cerrarSesion()">
                     <i class="fas fa-sign-out-alt"></i>
@@ -47,33 +182,13 @@
         </div>
     </div>
 
-    <!-- Container principal -->
     <div class="container">
-        <!-- Sección de mesas -->
         <div class="mesas-section">
             <div class="section">
                 <h2 class="section-title">
                     <i class="fas fa-table"></i>
                     Gestión de Mesas
                 </h2>
-                
-                <div class="mesas-controls">
-                    <div class="control-group">
-                        <label>Total de mesas:</label>
-                        <input type="number" id="totalMesas" class="control-input" min="1" max="50" value="15">
-                        <button class="btn-control" onclick="actualizarMesas()">
-                            <i class="fas fa-sync-alt"></i> Actualizar
-                        </button>
-                    </div>
-                    <div class="control-group">
-                        <label>Quitar mesa:</label>
-                        <input type="number" id="mesaQuitar" class="control-input" min="1" placeholder="Nº mesa">
-                        <button class="btn-control btn-danger" onclick="quitarMesa()">
-                            <i class="fas fa-trash"></i> Quitar
-                        </button>
-                    </div>
-                </div>
-                
                 <div class="mesas-grid" id="mesasGrid"></div>
             </div>
             
@@ -88,7 +203,6 @@
             </div>
         </div>
 
-        <!-- Sección de pedidos -->
         <div class="pedido-section">
             <div class="mesa-actual" id="mesaActual">
                 <i class="fas fa-mouse-pointer"></i> Selecciona una mesa
@@ -129,514 +243,545 @@
         </div>
     </div>
 
-    <!-- Modal de perfil -->
-    <div class="modal" id="profileModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">
-                    <i class="fas fa-user-edit"></i>
-                    Editar Perfil
-                </h3>
-                <button class="btn-close" onclick="cerrarModal()">&times;</button>
-            </div>
-            
-            <form id="profileForm">
-                <div class="form-group">
-                    <label>Nombre completo:</label>
-                    <input type="text" id="nombreCompleto" value="Juan Pérez">
-                </div>
-                
-                <div class="form-group">
-                    <label>Email:</label>
-                    <input type="email" id="email" value="juan.perez@barcontainer.com">
-                </div>
-                
-                <div class="form-group">
-                    <label>Teléfono:</label>
-                    <input type="tel" id="telefono" value="+52 555 123 4567">
-                </div>
-                
-                <div class="form-group">
-                    <label>Contraseña:</label>
-                    <input type="password" id="password" placeholder="Dejar en blanco para no cambiar">
-                </div>
-                
-                <div class="botones-accion">
-                    <button type="button" class="btn btn-cuenta" onclick="guardarPerfil()">
-                        <i class="fas fa-save"></i> Guardar
-                    </button>
-                    <button type="button" class="btn btn-limpiar" onclick="cerrarModal()">
-                        <i class="fas fa-times"></i> Cancelar
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <script>
-        // Datos del sistema (mantiene la funcionalidad original)
-        let mesas = [];
-        let productos = [];
-        let cuentas = [];
-        let pedidoActual = [];
-        let mesaSeleccionada = null;
-        let idEmpleado = 1;
-
-        // Funciones del menú de perfil
-        function toggleProfileMenu() {
-            const menu = document.getElementById('profileMenu');
-            const chevron = document.getElementById('profileChevron');
-            
-            menu.classList.toggle('active');
-            chevron.style.transform = menu.classList.contains('active') ? 'rotate(180deg)' : 'rotate(0deg)';
-        }
-
-        function editarPerfil() {
-            document.getElementById('profileModal').classList.add('active');
-            toggleProfileMenu();
-        }
-
-        function configuraciones() {
-            alert('Función de configuraciones - Próximamente');
-            toggleProfileMenu();
-        }
-function estadisticas() {
-            alert('Función de estadísticas - Próximamente');
-            toggleProfileMenu();
-        }
-
-        function cerrarSesion() {
-            if (confirm('¿Estás seguro de que quieres cerrar sesión?')) {
-                alert('Cerrando sesión...');
-                // Aquí iría la lógica para cerrar sesión
+       // Función para crear alertas personalizadas
+function mostrarAlerta(mensaje, tipo = 'info', duracion = 3000) {
+    // Remover alertas existentes
+    const alertasExistentes = document.querySelectorAll('.custom-alert');
+    alertasExistentes.forEach(alerta => alerta.remove());
+    
+    // Crear el elemento de alerta
+    const alerta = document.createElement('div');
+    alerta.className = `custom-alert custom-alert-${tipo}`;
+    
+    // Definir iconos según el tipo
+    const iconos = {
+        'success': 'fas fa-check-circle',
+        'error': 'fas fa-exclamation-triangle',
+        'warning': 'fas fa-exclamation-circle',
+        'info': 'fas fa-info-circle'
+    };
+    
+    alerta.innerHTML = `
+        <div class="custom-alert-content">
+            <i class="${iconos[tipo] || iconos.info}"></i>
+            <span>${mensaje}</span>
+        </div>
+        <button class="custom-alert-close" onclick="this.parentElement.remove()">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    
+    // Agregar estilos inline para que funcione sin CSS adicional
+    Object.assign(alerta.style, {
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        backgroundColor: tipo === 'success' ? '#10b981' : 
+                        tipo === 'error' ? '#ef4444' : 
+                        tipo === 'warning' ? '#f59e0b' : '#3b82f6',
+        color: 'white',
+        padding: '12px 16px',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        zIndex: '10000',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        minWidth: '300px',
+        maxWidth: '400px',
+        fontSize: '14px',
+        fontWeight: '500',
+        animation: 'slideInRight 0.3s ease-out',
+        transition: 'all 0.3s ease'
+    });
+    
+    const content = alerta.querySelector('.custom-alert-content');
+    Object.assign(content.style, {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px'
+    });
+    
+    const closeBtn = alerta.querySelector('.custom-alert-close');
+    Object.assign(closeBtn.style, {
+        background: 'none',
+        border: 'none',
+        color: 'white',
+        cursor: 'pointer',
+        padding: '4px',
+        borderRadius: '4px',
+        marginLeft: '12px'
+    });
+    
+    // Agregar animación CSS
+    if (!document.querySelector('#custom-alert-styles')) {
+        const style = document.createElement('style');
+        style.id = 'custom-alert-styles';
+        style.textContent = `
+            @keyframes slideInRight {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
             }
-            toggleProfileMenu();
-        }
-
-        function cerrarModal() {
-            document.getElementById('profileModal').classList.remove('active');
-        }
-
-        function guardarPerfil() {
-            const nombre = document.getElementById('nombreCompleto').value;
-            const email = document.getElementById('email').value;
-            const telefono = document.getElementById('telefono').value;
-            
-            // Actualizar la información en el header
-            document.querySelector('.profile-info h3').textContent = nombre;
-            
-            alert('Perfil actualizado correctamente');
-            cerrarModal();
-        }
-
-        // Cerrar menú de perfil al hacer clic fuera
-        document.addEventListener('click', function(event) {
-            const profileDropdown = document.querySelector('.profile-dropdown');
-            const profileMenu = document.getElementById('profileMenu');
-            
-            if (!profileDropdown.contains(event.target) && profileMenu.classList.contains('active')) {
-                toggleProfileMenu();
+            .custom-alert-close:hover {
+                background-color: rgba(255,255,255,0.2) !important;
             }
-        });
-
-        // Cerrar modal al hacer clic fuera
-        document.addEventListener('click', function(event) {
-            const modal = document.getElementById('profileModal');
-            const modalContent = document.querySelector('.modal-content');
-            
-            if (event.target === modal) {
-                cerrarModal();
+        `;
+        document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(alerta);
+    
+    // Auto-remover después del tiempo especificado
+    if (duracion > 0) {
+        setTimeout(() => {
+            if (alerta.parentElement) {
+                alerta.style.transform = 'translateX(100%)';
+                alerta.style.opacity = '0';
+                setTimeout(() => alerta.remove(), 300);
             }
-        });
+        }, duracion);
+    }
+}
 
-        // Inicialización del sistema
-        function inicializarSistema() {
-            // Productos del bar
-            productos = [
-                { id: 1, nombre: 'Cerveza Corona', precio: 45.00, categoria: 'Cerveza' },
-                { id: 2, nombre: 'Cerveza Modelo', precio: 42.00, categoria: 'Cerveza' },
-                { id: 3, nombre: 'Tequila Blanco', precio: 65.00, categoria: 'Destilados' },
-                { id: 4, nombre: 'Whisky JW Red', precio: 85.00, categoria: 'Destilados' },
-                { id: 5, nombre: 'Vodka Absolut', precio: 75.00, categoria: 'Destilados' },
-                { id: 6, nombre: 'Mojito', precio: 120.00, categoria: 'Cocteles' },
-                { id: 7, nombre: 'Margarita', precio: 110.00, categoria: 'Cocteles' },
-                { id: 8, nombre: 'Piña Colada', precio: 130.00, categoria: 'Cocteles' },
-                { id: 9, nombre: 'Nachos', precio: 95.00, categoria: 'Botanas' },
-                { id: 10, nombre: 'Alitas Buffalo', precio: 125.00, categoria: 'Botanas' },
-                { id: 11, nombre: 'Quesadillas', precio: 85.00, categoria: 'Botanas' },
-                { id: 12, nombre: 'Agua Mineral', precio: 25.00, categoria: 'Sin Alcohol' },
-                { id: 13, nombre: 'Refresco', precio: 30.00, categoria: 'Sin Alcohol' },
-                { id: 14, nombre: 'Jugo Natural', precio: 35.00, categoria: 'Sin Alcohol' }
-            ];
-
-            // Inicializar mesas
-            const totalMesas = parseInt(document.getElementById('totalMesas').value) || 15;
-            generarMesas(totalMesas);
-            
-            // Mostrar productos
-            mostrarProductos();
-            
-            // Actualizar interfaz
-            actualizarPedido();
-            actualizarCuentas();
-        }
-
-        function generarMesas(cantidad) {
-            mesas = [];
-            for (let i = 1; i <= cantidad; i++) {
-                mesas.push({
-                    numero: i,
-                    estado: 'libre', // libre, ocupada
-                    pedido: [],
-                    cuenta: null
-                });
+// Función para confirmaciones personalizadas
+function mostrarConfirmacion(mensaje, callback, textoConfirmar = 'Confirmar', textoCancelar = 'Cancelar') {
+    // Remover confirmaciones existentes
+    const confirmacionesExistentes = document.querySelectorAll('.custom-confirm');
+    confirmacionesExistentes.forEach(confirmacion => confirmacion.remove());
+    
+    // Crear overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'custom-confirm';
+    Object.assign(overlay.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        width: '100%',
+        height: '100%',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        zIndex: '10001',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        animation: 'fadeIn 0.2s ease-out'
+    });
+    
+    // Crear modal
+    const modal = document.createElement('div');
+    Object.assign(modal.style, {
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        padding: '24px',
+        minWidth: '320px',
+        maxWidth: '400px',
+        boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+        animation: 'scaleIn 0.2s ease-out'
+    });
+    
+    modal.innerHTML = `
+        <div style="text-align: center;">
+            <div style="margin-bottom: 16px;">
+                <i class="fas fa-question-circle" style="font-size: 48px; color: #f59e0b;"></i>
+            </div>
+            <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px;">Confirmación</h3>
+            <p style="margin: 0 0 24px 0; color: #6b7280; line-height: 1.5;">${mensaje}</p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button id="confirm-yes" style="
+                    background-color: #ef4444;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-weight: 500;
+                    transition: background-color 0.2s;
+                ">${textoConfirmar}</button>
+                <button id="confirm-no" style="
+                    background-color: #6b7280;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-weight: 500;
+                    transition: background-color 0.2s;
+                ">${textoCancelar}</button>
+            </div>
+        </div>
+    `;
+    
+    // Agregar animaciones CSS si no existen
+    if (!document.querySelector('#custom-confirm-styles')) {
+        const style = document.createElement('style');
+        style.id = 'custom-confirm-styles';
+        style.textContent = `
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
             }
-            mostrarMesas();
+            @keyframes scaleIn {
+                from { transform: scale(0.9); opacity: 0; }
+                to { transform: scale(1); opacity: 1; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    
+    // Agregar event listeners
+    document.getElementById('confirm-yes').onclick = () => {
+        overlay.remove();
+        callback(true);
+    };
+    
+    document.getElementById('confirm-no').onclick = () => {
+        overlay.remove();
+        callback(false);
+    };
+    
+    // Cerrar al hacer click en el overlay
+    overlay.onclick = (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+            callback(false);
         }
+    };
+}
 
-        function mostrarMesas() {
-            const container = document.getElementById('mesasGrid');
-            container.innerHTML = '';
-            
-            mesas.forEach(mesa => {
-                const mesaElement = document.createElement('div');
-                mesaElement.className = `mesa ${mesa.estado}`;
-                if (mesaSeleccionada === mesa.numero) {
-                    mesaElement.classList.add('seleccionada');
-                }
-                
-                mesaElement.innerHTML = `
-                    <div class="mesa-numero">${mesa.numero}</div>
-                    <div class="mesa-estado">${mesa.estado}</div>
-                `;
-                
-                mesaElement.onclick = () => seleccionarMesa(mesa.numero);
-                container.appendChild(mesaElement);
-            });
+let mesas = <?php echo json_encode($mesas); ?>;
+let productos = <?php echo json_encode($productos); ?>;
+let mesaSeleccionada = null;
+let idUsuario = <?php echo $id_usuario; ?>;
+
+function toggleProfileMenu() {
+    const menu = document.getElementById('profileMenu');
+    const chevron = document.getElementById('profileChevron');
+    menu.classList.toggle('active');
+    chevron.style.transform = menu.classList.contains('active') ? 'rotate(180deg)' : 'rotate(0deg)';
+}
+
+function configuraciones() {
+    mostrarAlerta('Función de configuraciones - Próximamente', 'info');
+    toggleProfileMenu();
+}
+
+function cerrarSesion() {
+    mostrarConfirmacion('¿Estás seguro de que quieres cerrar sesión?', (confirmado) => {
+        if (confirmado) {
+            window.location.href = 'logout.php';
         }
+    }, 'Cerrar Sesión', 'Cancelar');
+    toggleProfileMenu();
+}
 
-        function mostrarProductos() {
-            const container = document.getElementById('productosList');
-            container.innerHTML = '';
-            
-            // Agrupar productos por categoría
-            const categorias = {};
-            productos.forEach(producto => {
-                if (!categorias[producto.categoria]) {
-                    categorias[producto.categoria] = [];
-                }
-                categorias[producto.categoria].push(producto);
-            });
-            
-            // Mostrar productos por categoría
-            Object.keys(categorias).forEach(categoria => {
-                const categoriaDiv = document.createElement('div');
-                categoriaDiv.innerHTML = `<h4 style="color: var(--accent); margin: 1rem 0 0.5rem 0; font-weight: 600;">${categoria}</h4>`;
-                container.appendChild(categoriaDiv);
-                
-                categorias[categoria].forEach(producto => {
-                    const productoElement = document.createElement('div');
-                    productoElement.className = 'producto';
-                    productoElement.innerHTML = `
-                        <div>
-                            <div class="producto-nombre">${producto.nombre}</div>
-                            <div class="producto-precio">$${producto.precio.toFixed(2)}</div>
-                        </div>
-                        <button class="btn-agregar" onclick="agregarProducto(${producto.id})">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                    `;
-                    container.appendChild(productoElement);
-                });
-            });
+async function enviarRequest(data) {
+    const response = await fetch(window.location.href, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    return await response.json();
+}
+
+function mostrarMesas() {
+    const container = document.getElementById('mesasGrid');
+    container.innerHTML = '';
+    
+    mesas.forEach(mesa => {
+        const mesaElement = document.createElement('div');
+        mesaElement.className = `mesa ${mesa.disponible ? 'libre' : 'ocupada'}`;
+        if (mesaSeleccionada === mesa.id_mesa) mesaElement.classList.add('seleccionada');
+        
+        mesaElement.innerHTML = `
+            <div class="mesa-numero">${mesa.numero_mesa}</div>
+            <div class="mesa-estado">${mesa.disponible ? 'libre' : 'ocupada'}</div>
+        `;
+        
+        mesaElement.onclick = () => seleccionarMesa(mesa.id_mesa, mesa.numero_mesa);
+        container.appendChild(mesaElement);
+    });
+}
+
+function mostrarProductos() {
+    const container = document.getElementById('productosList');
+    container.innerHTML = '';
+    
+    const categorias = {};
+    productos.forEach(producto => {
+        if (!categorias[producto.nombre_categoria]) {
+            categorias[producto.nombre_categoria] = [];
         }
-
-        function seleccionarMesa(numero) {
-            mesaSeleccionada = numero;
-            const mesa = mesas.find(m => m.numero === numero);
-            
-            // Actualizar interfaz
-            document.getElementById('mesaActual').innerHTML = `
-                <i class="fas fa-table"></i> Mesa ${numero} - ${mesa.estado.toUpperCase()}
+        categorias[producto.nombre_categoria].push(producto);
+    });
+    
+    Object.keys(categorias).forEach(categoria => {
+        const categoriaDiv = document.createElement('div');
+        categoriaDiv.innerHTML = `<h4 style="color: var(--accent); margin: 1rem 0 0.5rem 0; font-weight: 600;">${categoria}</h4>`;
+        container.appendChild(categoriaDiv);
+        
+        categorias[categoria].forEach(producto => {
+            const productoElement = document.createElement('div');
+            productoElement.className = 'producto';
+            productoElement.innerHTML = `
+                <div>
+                    <div class="producto-nombre">${producto.nombre_producto}</div>
+                    <div class="producto-precio">$${parseFloat(producto.precio).toFixed(0)}</div>
+                </div>
+                <button class="btn-agregar" onclick="agregarProducto(${producto.id_producto})">
+                    <i class="fas fa-plus"></i>
+                </button>
             `;
+            container.appendChild(productoElement);
+        });
+    });
+}
+
+function seleccionarMesa(id_mesa, numero_mesa) {
+    mesaSeleccionada = id_mesa;
+    document.getElementById('mesaActual').innerHTML = `<i class="fas fa-table"></i> Mesa ${numero_mesa}`;
+    mostrarMesas();
+    cargarCarrito();
+    mostrarAlerta(`Mesa ${numero_mesa} seleccionada`, 'success', 2000);
+}
+
+async function agregarProducto(id_producto) {
+    if (!mesaSeleccionada) {
+        mostrarAlerta('Selecciona una mesa primero', 'warning');
+        return;
+    }
+    
+    const result = await enviarRequest({
+        action: 'agregar_producto',
+        id_mesa: mesaSeleccionada,
+        id_usuario: idUsuario,
+        id_producto: id_producto
+    });
+    
+    if (result.success) {
+        cargarCarrito();
+        mostrarAlerta('Producto agregado al pedido', 'success', 2000);
+    } else {
+        mostrarAlerta('Error al agregar producto', 'error');
+    }
+}
+
+async function cargarCarrito() {
+    if (!mesaSeleccionada) return;
+    
+    try {
+        const response = await fetch(`carrito.php?id_mesa=${mesaSeleccionada}&id_usuario=${idUsuario}`);
+        const carrito = await response.json();
+        mostrarCarrito(carrito);
+    } catch (e) {
+        mostrarCarrito([]);
+    }
+}
+
+function mostrarCarrito(carrito) {
+    const container = document.getElementById('pedidoItems');
+    const totalElement = document.getElementById('totalPedido');
+    
+    container.innerHTML = '';
+    let total = 0;
+    
+    carrito.forEach(item => {
+        const itemElement = document.createElement('div');
+        itemElement.className = 'pedido-item';
+        itemElement.innerHTML = `
+            <div>
+                <div class="item-nombre">${item.nombre_producto}</div>
+                <div class="item-precio">$${parseFloat(item.precio_unitario).toFixed(0)} c/u</div>
+            </div>
+            <div class="cantidad-controls">
+                <button class="btn-cantidad" onclick="modificarCantidad(${item.id_producto}, ${item.cantidad - 1})">
+                    <i class="fas fa-minus"></i>
+                </button>
+                <span class="cantidad">${item.cantidad}</span>
+                <button class="btn-cantidad" onclick="modificarCantidad(${item.id_producto}, ${item.cantidad + 1})">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+        `;
+        container.appendChild(itemElement);
+        total += item.cantidad * item.precio_unitario;
+    });
+    
+    totalElement.textContent = total.toFixed(0);
+}
+
+async function modificarCantidad(id_producto, nueva_cantidad) {
+    const result = await enviarRequest({
+        action: 'modificar_cantidad',
+        id_producto: id_producto,
+        id_mesa: mesaSeleccionada,
+        id_usuario: idUsuario,
+        cantidad: nueva_cantidad
+    });
+    
+    if (result.success) {
+        cargarCarrito();
+        if (nueva_cantidad <= 0) {
+            mostrarAlerta('Producto eliminado del pedido', 'info', 2000);
+        } else {
+            mostrarAlerta('Cantidad actualizada', 'success', 1500);
+        }
+    } else {
+        mostrarAlerta('Error al modificar cantidad', 'error');
+    }
+}
+
+async function enviarPedido() {
+    if (!mesaSeleccionada) {
+        mostrarAlerta('Selecciona una mesa primero', 'warning');
+        return;
+    }
+    
+    const result = await enviarRequest({
+        action: 'procesar_venta',
+        id_mesa: mesaSeleccionada,
+        id_usuario: idUsuario
+    });
+    
+    if (result.success) {
+        mostrarAlerta('Pedido enviado correctamente', 'success');
+        cargarCarrito();
+        cargarCuentas();
+    } else {
+        mostrarAlerta('Error al enviar pedido', 'error');
+    }
+}
+
+async function generarCuenta() {
+    await enviarPedido();
+}
+
+async function limpiarPedido() {
+    if (!mesaSeleccionada) return;
+    
+    mostrarConfirmacion('¿Limpiar el pedido actual?', async (confirmado) => {
+        if (confirmado) {
+            const result = await enviarRequest({
+                action: 'limpiar_carrito',
+                id_mesa: mesaSeleccionada,
+                id_usuario: idUsuario
+            });
             
-            // Cargar pedido existente si la mesa está ocupada
-            if (mesa.estado === 'ocupada' && mesa.pedido) {
-                pedidoActual = [...mesa.pedido];
+            if (result.success) {
+                cargarCarrito();
+                mostrarAlerta('Pedido limpiado', 'info');
             } else {
-                pedidoActual = [];
+                mostrarAlerta('Error al limpiar pedido', 'error');
             }
-            
-            mostrarMesas();
-            actualizarPedido();
         }
+    }, 'Limpiar', 'Cancelar');
+}
 
-        function agregarProducto(productoId) {
-            if (!mesaSeleccionada) {
-                alert('Por favor selecciona una mesa primero');
-                return;
-            }
+async function cargarCuentas() {
+    try {
+        const response = await fetch('cuentas.php');
+        const cuentas = await response.json();
+        mostrarCuentas(cuentas);
+    } catch (e) {
+        mostrarCuentas([]);
+    }
+}
+
+function mostrarCuentas(cuentas) {
+    const container = document.getElementById('cuentasList');
+    container.innerHTML = '';
+    
+    if (cuentas.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 1rem;">No hay cuentas pendientes</p>';
+        return;
+    }
+    
+    cuentas.forEach(cuenta => {
+        const cuentaElement = document.createElement('div');
+        cuentaElement.className = 'cuenta-item';
+        cuentaElement.innerHTML = `
+            <div class="cuenta-header">
+                <span class="cuenta-mesa">Mesa ${cuenta.numero_mesa}</span>
+                <span class="cuenta-total">$${parseFloat(cuenta.total).toFixed(0)}</span>
+            </div>
+            <div class="botones-accion">
+                <button class="btn btn-cuenta btn-small" onclick="pagarCuenta(${cuenta.id_venta})">
+                    <i class="fas fa-credit-card"></i> Pagar
+                </button>
+            </div>
+        `;
+        container.appendChild(cuentaElement);
+    });
+}
+
+async function pagarCuenta(id_venta) {
+    mostrarConfirmacion('¿Confirmar pago de la cuenta?', async (confirmado) => {
+        if (confirmado) {
+            const result = await enviarRequest({
+                action: 'pagar_venta',
+                id_venta: id_venta
+            });
             
-            const producto = productos.find(p => p.id === productoId);
-            const itemExistente = pedidoActual.find(item => item.id === productoId);
-            
-            if (itemExistente) {
-                itemExistente.cantidad++;
+            if (result.success) {
+                mostrarAlerta('Pago procesado correctamente', 'success');
+                cargarCuentas();
             } else {
-                pedidoActual.push({
-                    id: producto.id,
-                    nombre: producto.nombre,
-                    precio: producto.precio,
-                    cantidad: 1
-                });
-            }
-            
-            actualizarPedido();
-        }
-
-        function actualizarPedido() {
-            const container = document.getElementById('pedidoItems');
-            const totalElement = document.getElementById('totalPedido');
-            
-            container.innerHTML = '';
-            let total = 0;
-            
-            pedidoActual.forEach(item => {
-                const itemElement = document.createElement('div');
-                itemElement.className = 'pedido-item';
-                itemElement.innerHTML = `
-                    <div>
-                        <div class="item-nombre">${item.nombre}</div>
-                        <div class="item-precio">$${item.precio.toFixed(2)} c/u</div>
-                    </div>
-                    <div class="cantidad-controls">
-                        <button class="btn-cantidad" onclick="modificarCantidad(${item.id}, -1)">
-                            <i class="fas fa-minus"></i>
-                        </button>
-                        <span class="cantidad">${item.cantidad}</span>
-                        <button class="btn-cantidad" onclick="modificarCantidad(${item.id}, 1)">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                    </div>
-                `;
-                container.appendChild(itemElement);
-                total += item.precio * item.cantidad;
-            });
-            
-            totalElement.textContent = total.toFixed(2);
-        }
-
-        function modificarCantidad(productoId, cambio) {
-            const item = pedidoActual.find(item => item.id === productoId);
-            if (!item) return;
-            
-            item.cantidad += cambio;
-            
-            if (item.cantidad <= 0) {
-                const index = pedidoActual.indexOf(item);
-                pedidoActual.splice(index, 1);
-            }
-            
-            actualizarPedido();
-        }
-
-        function enviarPedido() {
-            if (!mesaSeleccionada || pedidoActual.length === 0) {
-                alert('Selecciona una mesa y agrega productos al pedido');
-                return;
-            }
-            
-            const mesa = mesas.find(m => m.numero === mesaSeleccionada);
-            mesa.estado = 'ocupada';
-            mesa.pedido = [...pedidoActual];
-            
-            alert(`Pedido enviado a la cocina para la Mesa ${mesaSeleccionada}`);
-            
-            // Limpiar pedido actual pero mantener mesa seleccionada
-            pedidoActual = [];
-            mostrarMesas();
-            actualizarPedido();
-        }
-
-        function generarCuenta() {
-            if (!mesaSeleccionada) {
-                alert('Selecciona una mesa primero');
-                return;
-            }
-            
-            const mesa = mesas.find(m => m.numero === mesaSeleccionada);
-            
-            if (mesa.estado !== 'ocupada' || !mesa.pedido || mesa.pedido.length === 0) {
-                alert('Esta mesa no tiene pedidos para generar cuenta');
-                return;
-            }
-            
-            let total = 0;
-            mesa.pedido.forEach(item => {
-                total += item.precio * item.cantidad;
-            });
-            
-            const cuenta = {
-                id: Date.now(),
-                mesa: mesaSeleccionada,
-                items: [...mesa.pedido],
-                total: total,
-                fecha: new Date(),
-                empleado: idEmpleado,
-                estado: 'pendiente'
-            };
-            
-            cuentas.push(cuenta);
-            mesa.cuenta = cuenta.id;
-            
-            alert(`Cuenta generada para Mesa ${mesaSeleccionada}\nTotal: $${total.toFixed(2)}`);
-            
-            actualizarCuentas();
-        }
-
-        function actualizarCuentas() {
-            const container = document.getElementById('cuentasList');
-            container.innerHTML = '';
-            
-            const cuentasPendientes = cuentas.filter(c => c.estado === 'pendiente');
-            
-            if (cuentasPendientes.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 1rem;">No hay cuentas pendientes</p>';
-                return;
-            }
-            
-            cuentasPendientes.forEach(cuenta => {
-                const cuentaElement = document.createElement('div');
-                cuentaElement.className = 'cuenta-item';
-                cuentaElement.innerHTML = `
-                    <div class="cuenta-header">
-                        <span class="cuenta-mesa">Mesa ${cuenta.mesa}</span>
-                        <span class="cuenta-total">$${cuenta.total.toFixed(2)}</span>
-                    </div>
-                    <div class="botones-accion">
-                        <button class="btn btn-cuenta btn-small" onclick="pagarCuenta(${cuenta.id})">
-                            <i class="fas fa-credit-card"></i> Pagar
-                        </button>
-                        <button class="btn btn-enviar btn-small" onclick="verCuenta(${cuenta.id})">
-                            <i class="fas fa-eye"></i> Ver
-                        </button>
-                    </div>
-                `;
-                container.appendChild(cuentaElement);
-            });
-        }
-
-        function pagarCuenta(cuentaId) {
-            const cuenta = cuentas.find(c => c.id === cuentaId);
-            if (!cuenta) return;
-            
-            const mesa = mesas.find(m => m.numero === cuenta.mesa);
-            
-            if (confirm(`¿Confirmar pago de $${cuenta.total.toFixed(2)} para Mesa ${cuenta.mesa}?`)) {
-                cuenta.estado = 'pagada';
-                mesa.estado = 'libre';
-                mesa.pedido = [];
-                mesa.cuenta = null;
-                
-                alert('Pago procesado correctamente');
-                
-                // Si era la mesa seleccionada, limpiar pedido
-                if (mesaSeleccionada === cuenta.mesa) {
-                    pedidoActual = [];
-                    actualizarPedido();
-                }
-                
-                mostrarMesas();
-                actualizarCuentas();
+                mostrarAlerta('Error al procesar pago', 'error');
             }
         }
+    }, 'Confirmar Pago', 'Cancelar');
+}
 
-        function verCuenta(cuentaId) {
-            const cuenta = cuentas.find(c => c.id === cuentaId);
-            if (!cuenta) return;
-            
-            let detalle = `CUENTA - MESA ${cuenta.mesa}\n`;
-            detalle += `Fecha: ${cuenta.fecha.toLocaleString()}\n`;
-            detalle += `----------------------------------------\n`;
-            
-            cuenta.items.forEach(item => {
-                detalle += `${item.nombre} x${item.cantidad} - $${(item.precio * item.cantidad).toFixed(2)}\n`;
-            });
-            
-            detalle += `----------------------------------------\n`;
-            detalle += `TOTAL: $${cuenta.total.toFixed(2)}`;
-            
-            alert(detalle);
-        }
+document.addEventListener('click', function(event) {
+    const profileDropdown = document.querySelector('.profile-dropdown');
+    const profileMenu = document.getElementById('profileMenu');
+    
+    if (!profileDropdown.contains(event.target) && profileMenu.classList.contains('active')) {
+        toggleProfileMenu();
+    }
+});
 
-        function limpiarPedido() {
-            if (pedidoActual.length === 0) return;
-            
-            if (confirm('¿Estás seguro de que quieres limpiar el pedido actual?')) {
-                pedidoActual = [];
-                actualizarPedido();
-            }
-        }
+document.addEventListener('DOMContentLoaded', function() {
+    mostrarMesas();
+    mostrarProductos();
+    cargarCuentas();
+});
 
-        function actualizarMesas() {
-            const totalMesas = parseInt(document.getElementById('totalMesas').value);
-            if (totalMesas < 1 || totalMesas > 50) {
-                alert('El número de mesas debe estar entre 1 y 50');
-                return;
-            }
-            
-            generarMesas(totalMesas);
-            mesaSeleccionada = null;
-            pedidoActual = [];
-            document.getElementById('mesaActual').innerHTML = '<i class="fas fa-mouse-pointer"></i> Selecciona una mesa';
-            actualizarPedido();
-        }
+// Función actualizada para enviar requests AJAX
+async function enviarRequest(data) {
+    const response = await fetch('/mesero/action', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    return await response.json();
+}
 
-        function quitarMesa() {
-            const numeroMesa = parseInt(document.getElementById('mesaQuitar').value);
-            if (!numeroMesa) {
-                alert('Ingresa el número de mesa a quitar');
-                return;
-            }
-            
-            const mesaIndex = mesas.findIndex(m => m.numero === numeroMesa);
-            if (mesaIndex === -1) {
-                alert('Mesa no encontrada');
-                return;
-            }
-            
-            const mesa = mesas[mesaIndex];
-            if (mesa.estado === 'ocupada') {
-                alert('No se puede quitar una mesa ocupada');
-                return;
-            }
-            
-            if (confirm(`¿Estás seguro de que quieres quitar la Mesa ${numeroMesa}?`)) {
-                mesas.splice(mesaIndex, 1);
-                
-                // Renumerar mesas
-                mesas.forEach((mesa, index) => {
-                    mesa.numero = index + 1;
-                });
-                
-                // Actualizar input
-                document.getElementById('totalMesas').value = mesas.length;
-                document.getElementById('mesaQuitar').value = '';
-                
-                // Limpiar selección si era la mesa quitada
-                if (mesaSeleccionada === numeroMesa) {
-                    mesaSeleccionada = null;
-                    pedidoActual = [];
-                    document.getElementById('mesaActual').innerHTML = '<i class="fas fa-mouse-pointer"></i> Selecciona una mesa';
-                    actualizarPedido();
-                }
-                
-                mostrarMesas();
-            }
-        }
+// Función actualizada para cargar el carrito
+async function cargarCarrito() {
+    if (!mesaSeleccionada) return;
+    
+    try {
+        const response = await fetch(`/mesero/carrito?id_mesa=${mesaSeleccionada}&id_usuario=${idUsuario}`);
+        const carrito = await response.json();
+        mostrarCarrito(carrito);
+    } catch (e) {
+        mostrarCarrito([]);
+    }
+}
 
-        // Inicializar sistema al cargar la página
-        document.addEventListener('DOMContentLoaded', inicializarSistema);
+// Función actualizada para cargar las cuentas
+async function cargarCuentas() {
+    try {
+        const response = await fetch('/mesero/cuentas');
+        const cuentas = await response.json();
+        mostrarCuentas(cuentas);
+    } catch (e) {
+        mostrarCuentas([]);
+    }
+}
     </script>
 </body>
 </html>
