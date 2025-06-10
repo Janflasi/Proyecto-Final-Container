@@ -3,6 +3,20 @@
 require_once 'config/Conexion.php';
 if (session_status() == PHP_SESSION_NONE) session_start();
 
+// Verificar si el usuario está logueado
+if (!isset($_SESSION['usuario_id'])) {
+    header("Location: /login");
+    exit();
+}
+
+// Procesar cerrar sesión
+if (isset($_GET['logout'])) {
+    session_unset();
+    session_destroy();
+    header("Location: /login");
+    exit();
+}
+
 $db = new Database();
 if (!$pdo = $db->getConnection()) die("Error: No se pudo establecer conexión con la base de datos.");
 
@@ -22,6 +36,9 @@ function fetchData($pdo, $sql, $params = []) {
 function fetchAllData($pdo, $sql, $params = []) {
     return queryDB($pdo, $sql, $params)->fetchAll();
 }
+
+// Obtener información del usuario actual
+$usuario_actual = fetchData($pdo, "SELECT u.nombre, u.email, r.nombre_rol FROM usuarios u JOIN roles r ON u.id_rol = r.id_rol WHERE u.id_usuario = ?", [$_SESSION['usuario_id']]);
 
 try {
     // Consultas optimizadas para dashboard
@@ -169,7 +186,7 @@ if ($_POST && isset($_POST['action'])) {
             ],
             'Sistema' => [
                 ['Mesas', '/admin/mesas', 'mesas', 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z'],
-                ['mesas', '#', 'mesas', 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z']
+                ['Configuración', '#', 'config', 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z']
             ]
         ];
         
@@ -191,10 +208,52 @@ if ($_POST && isset($_POST['action'])) {
             </div>
         <?php endforeach; ?>
     </div>
+    
+    <!-- Área de usuario y logout al final del sidebar -->
+    <div class="user-area">
+        <div class="user-info">
+            <div class="user-avatar">
+                <?php echo strtoupper(substr($usuario_actual['nombre'] ?? 'U', 0, 1)); ?>
+            </div>
+            <div class="user-details">
+                <div class="user-name"><?php echo htmlspecialchars($usuario_actual['nombre'] ?? 'Usuario'); ?></div>
+                <div class="user-role"><?php echo htmlspecialchars($usuario_actual['nombre_rol'] ?? 'Rol'); ?></div>
+            </div>
+        </div>
+        <button class="logout-btn" onclick="confirmLogout()">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+            Cerrar Sesión
+        </button>
+    </div>
 </nav>
+
+<!-- Modal de confirmación de logout -->
+<div id="logoutModal" class="logout-confirmation">
+    <div class="logout-modal">
+        <h3>¿Cerrar Sesión?</h3>
+        <p>¿Estás seguro de que deseas cerrar tu sesión?</p>
+        <div class="logout-actions">
+            <button class="btn-cancel" onclick="cancelLogout()">Cancelar</button>
+            <button class="btn-confirm" onclick="doLogout()">Cerrar Sesión</button>
+        </div>
+    </div>
+</div>
 
 <!-- Main Content -->
 <main class="main-content">
+    <!-- Header con información del usuario -->
+    <header class="main-header">
+    
+        <div class="header-right">
+            <div class="user-info-header">
+                <span>Bienvenido, <?php echo htmlspecialchars($usuario_actual['nombre'] ?? 'Usuario'); ?></span>
+                <small><?php echo htmlspecialchars($usuario_actual['nombre_rol'] ?? 'Rol'); ?></small>
+            </div>
+        </div>
+    </header>
+
     <!-- Mostrar mensajes -->
     <?php 
     $messages = [
@@ -376,5 +435,34 @@ if ($_POST && isset($_POST['action'])) {
         </div>
     </section>
 </main>
+
+<script>
+// Función para confirmar logout
+function confirmLogout() {
+    document.getElementById('logoutModal').style.display = 'flex';
+}
+
+// Función para cancelar logout
+function cancelLogout() {
+    document.getElementById('logoutModal').style.display = 'none';
+}
+
+// Función para hacer logout
+function doLogout() {
+    window.location.href = '?logout=1';
+}
+
+// Función para mostrar secciones (si la tienes implementada)
+function showSection(section) {
+    // Tu lógica de navegación aquí
+    console.log('Navegando a:', section);
+}
+
+// Función para editar producto (placeholder)
+function editProducto(id) {
+    console.log('Editando producto:', id);
+}
+</script>
+
 </body>
 </html>

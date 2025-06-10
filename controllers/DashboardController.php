@@ -671,6 +671,7 @@ class DashboardController {
             "title" => "Seguridad del Sistema"
         ]);
     }
+    
 }
 
 ?>

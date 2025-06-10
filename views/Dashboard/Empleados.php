@@ -5,38 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Container Bar - Gestión de Empleados</title>
     <link rel="stylesheet" href="/style/style5.css">
-    
 </head>
 <body>
     <div class="container">
         <!-- Header -->
-     <div class="header">
-    <img src="/assets/unnamed.png" alt="Container Bar" class="header-logo">
-    <h1>CONTAINER BAR</h1>
-    <p>Sistema de Gestión de Empleados</p>
-</div>
+        <div class="header">
+            <img src="/assets/unnamed.png" alt="Container Bar" class="header-logo">
+            <h1>CONTAINER BAR</h1>
+            <p>Sistema de Gestión de Empleados</p>
+            <div style="margin-top: 10px;">
+                <span id="currentUser">👤 Admin: Juan Perez</span>
+               
+            </div>
+        </div>
 
         <!-- Stats Grid -->
         <div class="stats-grid">
             <div class="stat-card">
                 <h3>Total Empleados</h3>
-                <div class="number" id="totalEmployees">12</div>
-                <p>Personal activo</p>
+                <div class="number" id="totalEmployees">0</div>
+                <p>Personal registrado</p>
             </div>
             <div class="stat-card">
-                <h3>Turno Actual</h3>
-                <div class="number" id="currentShift">8</div>
-                <p>En servicio ahora</p>
+                <h3>Administradores</h3>
+                <div class="number" id="totalAdmins">0</div>
+                <p>Con acceso total</p>
             </div>
             <div class="stat-card">
-                <h3>De Vacaciones</h3>
-                <div class="number" id="onVacation">2</div>
-                <p>Ausentes temporalmente</p>
+                <h3>Meseros</h3>
+                <div class="number" id="totalWaiters">0</div>
+                <p>Personal de servicio</p>
             </div>
             <div class="stat-card">
-                <h3>Nuevos</h3>
-                <div class="number" id="newHires">3</div>
-                <p>Este mes</p>
+                <h3>Activos</h3>
+                <div class="number" id="activeEmployees">0</div>
+                <p>En servicio</p>
             </div>
         </div>
 
@@ -45,81 +48,14 @@
             <!-- Employees Section -->
             <div class="employees-section">
                 <div class="section-header">
-                    <h2 class="section-title">📋 Lista de Empleados</h2>
-                    <button class="btn" onclick="openModal('addEmployeeModal')">+ Nuevo Empleado</button>
+                    <h2 class="section-title">👥 Gestión de Usuario</h2>
+                    <button class="btn" onclick="openModal('addEmployeeModal')">+ Nuevo Usuario</button>
                 </div>
 
-                <input type="text" class="search-bar" placeholder="🔍 Buscar empleado..." id="searchInput" onkeyup="filterEmployees()">
+                <input type="text" class="search-bar" placeholder="🔍 Buscar por nombre, email o teléfono..." id="searchInput" onkeyup="filterEmployees()">
 
                 <div id="employeesList">
-                    <!-- Employee Cards -->
-                    <div class="employee-card" data-name="carlos martinez" data-position="bartender">
-                        <div class="employee-info">
-                            <div class="employee-details">
-                                <h4>Carlos Martínez</h4>
-                                <p>🍸 Bartender Senior</p>
-                                <p>📧 carlos@containerbar.com</p>
-                                <p>📱 +34 123 456 789</p>
-                            </div>
-                            <span class="status-badge status-active">Activo</span>
-                        </div>
-                        <div class="employee-actions">
-                            <button class="btn btn-secondary btn-small">✏️ Editar</button>
-                            <button class="btn btn-small">📅 Horarios</button>
-                            <button class="btn btn-danger btn-small">🗑️ Eliminar</button>
-                        </div>
-                    </div>
-
-                    <div class="employee-card" data-name="maria rodriguez" data-position="camarera">
-                        <div class="employee-info">
-                            <div class="employee-details">
-                                <h4>María Rodríguez</h4>
-                                <p>🍽️ Camarera</p>
-                                <p>📧 maria@containerbar.com</p>
-                                <p>📱 +34 987 654 321</p>
-                            </div>
-                            <span class="status-badge status-vacation">Vacaciones</span>
-                        </div>
-                        <div class="employee-actions">
-                            <button class="btn btn-secondary btn-small">✏️ Editar</button>
-                            <button class="btn btn-small">📅 Horarios</button>
-                            <button class="btn btn-danger btn-small">🗑️ Eliminar</button>
-                        </div>
-                    </div>
-
-                    <div class="employee-card" data-name="david lopez" data-position="cocinero">
-                        <div class="employee-info">
-                            <div class="employee-details">
-                                <h4>David López</h4>
-                                <p>👨‍🍳 Cocinero</p>
-                                <p>📧 david@containerbar.com</p>
-                                <p>📱 +34 555 123 456</p>
-                            </div>
-                            <span class="status-badge status-active">Activo</span>
-                        </div>
-                        <div class="employee-actions">
-                            <button class="btn btn-secondary btn-small">✏️ Editar</button>
-                            <button class="btn btn-small">📅 Horarios</button>
-                            <button class="btn btn-danger btn-small">🗑️ Eliminar</button>
-                        </div>
-                    </div>
-
-                    <div class="employee-card" data-name="ana garcia" data-position="gerente">
-                        <div class="employee-info">
-                            <div class="employee-details">
-                                <h4>Ana García</h4>
-                                <p>👩‍💼 Gerente de Turno</p>
-                                <p>📧 ana@containerbar.com</p>
-                                <p>📱 +34 666 789 123</p>
-                            </div>
-                            <span class="status-badge status-active">Activo</span>
-                        </div>
-                        <div class="employee-actions">
-                            <button class="btn btn-secondary btn-small">✏️ Editar</button>
-                            <button class="btn btn-small">📅 Horarios</button>
-                            <button class="btn btn-danger btn-small">🗑️ Eliminar</button>
-                        </div>
-                    </div>
+                    <!-- Los empleados se cargarán dinámicamente aquí -->
                 </div>
             </div>
 
@@ -133,93 +69,237 @@
                         <input type="text" id="quickName" placeholder="Ej: Juan Pérez">
                     </div>
                     <div class="form-group">
-                        <label>Posición</label>
-                        <select id="quickPosition">
+                        <label>Email</label>
+                        <input type="email" id="quickEmail" placeholder="email@containerbar.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Rol</label>
+                        <select id="quickRole">
                             <option value="">Seleccionar...</option>
-                            <option value="bartender">🍸 Bartender</option>
-                            <option value="camarera">🍽️ Camarera/o</option>
-                            <option value="cocinero">👨‍🍳 Cocinero/a</option>
-                            <option value="gerente">👔 Gerente</option>
-                            <option value="seguridad">🛡️ Seguridad</option>
-                            <option value="limpieza">🧹 Limpieza</option>
+                            <option value="1">👔 Administrador</option>
+                            <option value="2">🍽️ Mesero</option>
                         </select>
                     </div>
                     <button class="btn" onclick="quickAddEmployee()">➕ Agregar Rápido</button>
                 </div>
 
-                <!-- Schedule Info -->
+                <!-- Stats Info -->
                 <div class="schedule-info">
-                    <h3 class="section-title">🕐 Turnos de Hoy</h3>
+                    <h3 class="section-title">📊 Estadísticas</h3>
                     <div class="schedule-item">
-                        <span>Turno Mañana</span>
-                        <span class="shift-time">08:00 - 16:00</span>
+                        <span>Usuarios Registrados</span>
+                        <span class="shift-time" id="statsTotal">0</span>
                     </div>
                     <div class="schedule-item">
-                        <span>Turno Tarde</span>
-                        <span class="shift-time">16:00 - 00:00</span>
+                        <span>Activos Hoy</span>
+                        <span class="shift-time" id="statsActive">0</span>
                     </div>
                     <div class="schedule-item">
-                        <span>Turno Noche</span>
-                        <span class="shift-time">00:00 - 08:00</span>
+                        <span>Nuevos Este Mes</span>
+                        <span class="shift-time" id="statsNewMonth">0</span>
                     </div>
-                    <button class="btn btn-secondary" style="margin-top: 15px; width: 100%;">📊 Ver Horarios Completos</button>
+                    <button class="btn btn-secondary" style="margin-top: 15px; width: 100%;" onclick="generateReport()">📈 Generar Reporte</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal para agregar empleado -->
+    <!-- Modal para agregar/editar empleado -->
     <div id="addEmployeeModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeModal('addEmployeeModal')">&times;</span>
-            <h2 class="section-title">➕ Agregar Nuevo Empleado</h2>
-            <div class="form-group">
-                <label>Nombre Completo</label>
-                <input type="text" id="modalName" placeholder="Nombre y apellidos">
+            <h2 class="section-title" id="modalTitle">➕ Agregar Nuevo Usuario</h2>
+            
+            <form id="employeeForm">
+                <input type="hidden" id="modalUserId" value="">
+                
+                <div class="form-group">
+                    <label>Nombre Completo *</label>
+                    <input type="text" id="modalName" placeholder="Nombre completo" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Email *</label>
+                    <input type="email" id="modalEmail" placeholder="email@containerbar.com" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Contraseña *</label>
+                    <input type="password" id="modalPassword" placeholder="Contraseña segura" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="tel" id="modalPhone" placeholder="+57 300 123 4567">
+                </div>
+                
+                <div class="form-group">
+                    <label>Rol *</label>
+                    <select id="modalRole" required>
+                        <option value="">Seleccionar rol...</option>
+                        <option value="1">👔 Administrador</option>
+                        <option value="2">🍽️ Mesero</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Estado</label>
+                    <select id="modalStatus">
+                        <option value="1">✅ Activo</option>
+                        <option value="0">❌ Inactivo</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn" style="width: 100%; margin-top: 20px;">
+                    <span id="submitButtonText">✅ Crear Usuario</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación para eliminar -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <span class="close" onclick="closeModal('deleteModal')">&times;</span>
+            <h2 class="section-title">⚠️ Confirmar Eliminación</h2>
+            <p id="deleteMessage">¿Estás seguro de que deseas eliminar este usuario?</p>
+            <div style="margin-top: 20px; text-align: center;">
+                <button class="btn btn-danger" onclick="confirmDelete()">🗑️ Eliminar</button>
+                <button class="btn btn-secondary" onclick="closeModal('deleteModal')" style="margin-left: 10px;">❌ Cancelar</button>
             </div>
-            <div class="form-group">
-                <label>Email</label>
-                <input type="email" id="modalEmail" placeholder="email@containerbar.com">
-            </div>
-            <div class="form-group">
-                <label>Teléfono</label>
-                <input type="tel" id="modalPhone" placeholder="+34 xxx xxx xxx">
-            </div>
-            <div class="form-group">
-                <label>Posición</label>
-                <select id="modalPosition">
-                    <option value="">Seleccionar posición...</option>
-                    <option value="bartender">🍸 Bartender</option>
-                    <option value="camarera">🍽️ Camarera/o</option>
-                    <option value="cocinero">👨‍🍳 Cocinero/a</option>
-                    <option value="gerente">👔 Gerente</option>
-                    <option value="seguridad">🛡️ Seguridad</option>
-                    <option value="limpieza">🧹 Limpieza</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Estado</label>
-                <select id="modalStatus">
-                    <option value="active">Activo</option>
-                    <option value="inactive">Inactivo</option>
-                    <option value="vacation">Vacaciones</option>
-                </select>
-            </div>
-            <button class="btn" onclick="addEmployee()" style="width: 100%; margin-top: 20px;">✅ Crear Empleado</button>
         </div>
     </div>
 
     <script>
         // Variables globales
         let employees = [];
+        let currentUser = { id: 1, nombre: 'Juan Perez', rol: 1 }; // Simulando usuario logueado
+        let userToDelete = null;
 
-        // Funciones para el modal
+        // Inicializar la aplicación
+        document.addEventListener('DOMContentLoaded', function() {
+            loadEmployees();
+            updateStats();
+        });
+
+        // Simular carga de empleados desde la base de datos
+        function loadEmployees() {
+            // Simulando datos desde la base de datos usuarios
+            employees = [
+                {
+                    id_usuario: 1,
+                    nombre: 'Juan Perez',
+                    email: 'juan.perez@example.com',
+                    telefono: '3001234567',
+                    id_rol: 1,
+                    nombre_rol: 'Administrador',
+                    fecha_ingreso: '2024-05-01',
+                    activo: 1
+                },
+                {
+                    id_usuario: 2,
+                    nombre: 'Maria Lopez',
+                    email: 'maria.lopez@example.com',
+                    telefono: '3009876543',
+                    id_rol: 2,
+                    nombre_rol: 'Mesero',
+                    fecha_ingreso: '2024-05-05',
+                    activo: 1
+                },
+                {
+                    id_usuario: 3,
+                    nombre: 'Carlos Gomez',
+                    email: 'carlos.gomez@example.com',
+                    telefono: '3001122334',
+                    id_rol: 1,
+                    nombre_rol: 'Administrador',
+                    fecha_ingreso: '2024-05-10',
+                    activo: 1
+                },
+                {
+                    id_usuario: 4,
+                    nombre: 'Juan Torres',
+                    email: 'juan.torres@example.com',
+                    telefono: '3015551234',
+                    id_rol: 2,
+                    nombre_rol: 'Mesero',
+                    fecha_ingreso: '2024-06-10',
+                    activo: 1
+                }
+            ];
+            
+            renderEmployees();
+            updateStats();
+        }
+
+        // Renderizar lista de empleados
+        function renderEmployees() {
+            const container = document.getElementById('employeesList');
+            container.innerHTML = '';
+
+            employees.forEach(employee => {
+                const roleIcon = employee.id_rol == 1 ? '👔' : '🍽️';
+                const statusClass = employee.activo ? 'status-active' : 'status-inactive';
+                const statusText = employee.activo ? 'Activo' : 'Inactivo';
+
+                const employeeCard = `
+                    <div class="employee-card" data-name="${employee.nombre.toLowerCase()}" data-email="${employee.email.toLowerCase()}" data-phone="${employee.telefono}">
+                        <div class="employee-info">
+                            <div class="employee-details">
+                                <h4>${employee.nombre}</h4>
+                                <p>${roleIcon} ${employee.nombre_rol}</p>
+                                <p>📧 ${employee.email}</p>
+                                <p>📱 ${employee.telefono || 'No registrado'}</p>
+                                <p>📅 Ingreso: ${formatDate(employee.fecha_ingreso)}</p>
+                            </div>
+                            <span class="status-badge ${statusClass}">${statusText}</span>
+                        </div>
+                        <div class="employee-actions">
+                            <button class="btn btn-secondary btn-small" onclick="editEmployee(${employee.id_usuario})">✏️ Editar</button>
+                            <button class="btn btn-small" onclick="viewEmployee(${employee.id_usuario})">👁️ Ver</button>
+                            <button class="btn btn-danger btn-small" onclick="deleteEmployee(${employee.id_usuario})">🗑️ Eliminar</button>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += employeeCard;
+            });
+        }
+
+        // Actualizar estadísticas
+        function updateStats() {
+            const total = employees.length;
+            const admins = employees.filter(emp => emp.id_rol == 1).length;
+            const waiters = employees.filter(emp => emp.id_rol == 2).length;
+            const active = employees.filter(emp => emp.activo == 1).length;
+
+            document.getElementById('totalEmployees').textContent = total;
+            document.getElementById('totalAdmins').textContent = admins;
+            document.getElementById('totalWaiters').textContent = waiters;
+            document.getElementById('activeEmployees').textContent = active;
+
+            // Sidebar stats
+            document.getElementById('statsTotal').textContent = total;
+            document.getElementById('statsActive').textContent = active;
+            
+            // Nuevos este mes (simulado)
+            const currentMonth = new Date().getMonth();
+            const newThisMonth = employees.filter(emp => {
+                const empDate = new Date(emp.fecha_ingreso);
+                return empDate.getMonth() === currentMonth;
+            }).length;
+            document.getElementById('statsNewMonth').textContent = newThisMonth;
+        }
+
+        // Funciones del modal
         function openModal(modalId) {
             document.getElementById(modalId).style.display = 'block';
         }
 
         function closeModal(modalId) {
             document.getElementById(modalId).style.display = 'none';
+            if (modalId === 'addEmployeeModal') {
+                clearForm();
+            }
         }
 
         // Cerrar modal al hacer clic fuera
@@ -232,16 +312,206 @@
             }
         }
 
-        // Función para buscar empleados
+        // Limpiar formulario
+        function clearForm() {
+            document.getElementById('employeeForm').reset();
+            document.getElementById('modalUserId').value = '';
+            document.getElementById('modalTitle').textContent = '➕ Agregar Nuevo Usuario';
+            document.getElementById('submitButtonText').textContent = '✅ Crear Usuario';
+            document.getElementById('modalPassword').required = true;
+        }
+
+        // Agregar empleado rápido
+        function quickAddEmployee() {
+            const name = document.getElementById('quickName').value.trim();
+            const email = document.getElementById('quickEmail').value.trim();
+            const role = document.getElementById('quickRole').value;
+            
+            if (!name || !email || !role) {
+                alert('⚠️ Por favor completa todos los campos');
+                return;
+            }
+
+            // Verificar email único
+            if (employees.some(emp => emp.email.toLowerCase() === email.toLowerCase())) {
+                alert('⚠️ El email ya está registrado');
+                return;
+            }
+
+            const newEmployee = {
+                id_usuario: Date.now(), // Simular ID único
+                nombre: name,
+                email: email,
+                telefono: '',
+                id_rol: parseInt(role),
+                nombre_rol: role == 1 ? 'Administrador' : 'Mesero',
+                fecha_ingreso: new Date().toISOString().split('T')[0],
+                activo: 1
+            };
+
+            employees.push(newEmployee);
+            
+            // Limpiar formulario rápido
+            document.getElementById('quickName').value = '';
+            document.getElementById('quickEmail').value = '';
+            document.getElementById('quickRole').value = '';
+            
+            renderEmployees();
+            updateStats();
+            
+            alert(`✅ Usuario ${name} agregado exitosamente`);
+        }
+
+        // Manejar envío del formulario principal
+        document.getElementById('employeeForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const userId = document.getElementById('modalUserId').value;
+            const name = document.getElementById('modalName').value.trim();
+            const email = document.getElementById('modalEmail').value.trim();
+            const password = document.getElementById('modalPassword').value;
+            const phone = document.getElementById('modalPhone').value.trim();
+            const role = parseInt(document.getElementById('modalRole').value);
+            const status = parseInt(document.getElementById('modalStatus').value);
+
+            // Validaciones
+            if (!name || !email || (!password && !userId) || !role) {
+                alert('⚠️ Por favor completa los campos obligatorios');
+                return;
+            }
+
+            // Verificar email único (excepto para edición del mismo usuario)
+            const emailExists = employees.some(emp => 
+                emp.email.toLowerCase() === email.toLowerCase() && 
+                emp.id_usuario != userId
+            );
+            
+            if (emailExists) {
+                alert('⚠️ El email ya está registrado');
+                return;
+            }
+
+            if (userId) {
+                // Editar usuario existente
+                const employeeIndex = employees.findIndex(emp => emp.id_usuario == userId);
+                if (employeeIndex !== -1) {
+                    employees[employeeIndex] = {
+                        ...employees[employeeIndex],
+                        nombre: name,
+                        email: email,
+                        telefono: phone,
+                        id_rol: role,
+                        nombre_rol: role == 1 ? 'Administrador' : 'Mesero',
+                        activo: status
+                    };
+                    alert(`✅ Usuario ${name} actualizado exitosamente`);
+                }
+            } else {
+                // Crear nuevo usuario
+                const newEmployee = {
+                    id_usuario: Date.now(),
+                    nombre: name,
+                    email: email,
+                    telefono: phone,
+                    id_rol: role,
+                    nombre_rol: role == 1 ? 'Administrador' : 'Mesero',
+                    fecha_ingreso: new Date().toISOString().split('T')[0],
+                    activo: status
+                };
+                employees.push(newEmployee);
+                alert(`✅ Usuario ${name} creado exitosamente`);
+            }
+
+            closeModal('addEmployeeModal');
+            renderEmployees();
+            updateStats();
+        });
+
+        // Editar empleado
+        function editEmployee(userId) {
+            const employee = employees.find(emp => emp.id_usuario == userId);
+            if (!employee) return;
+
+            document.getElementById('modalUserId').value = employee.id_usuario;
+            document.getElementById('modalName').value = employee.nombre;
+            document.getElementById('modalEmail').value = employee.email;
+            document.getElementById('modalPhone').value = employee.telefono || '';
+            document.getElementById('modalRole').value = employee.id_rol;
+            document.getElementById('modalStatus').value = employee.activo;
+            document.getElementById('modalPassword').value = '';
+            document.getElementById('modalPassword').required = false;
+            
+            document.getElementById('modalTitle').textContent = '✏️ Editar Usuario';
+            document.getElementById('submitButtonText').textContent = '💾 Actualizar Usuario';
+            
+            openModal('addEmployeeModal');
+        }
+
+        // Ver detalles del empleado
+        function viewEmployee(userId) {
+            const employee = employees.find(emp => emp.id_usuario == userId);
+            if (!employee) return;
+
+            const roleIcon = employee.id_rol == 1 ? '👔' : '🍽️';
+            const statusIcon = employee.activo ? '✅' : '❌';
+            
+            alert(`👤 Detalles del Usuario:
+            
+Nombre: ${employee.nombre}
+Email: ${employee.email}
+Teléfono: ${employee.telefono || 'No registrado'}
+Rol: ${roleIcon} ${employee.nombre_rol}
+Estado: ${statusIcon} ${employee.activo ? 'Activo' : 'Inactivo'}
+Fecha de Ingreso: ${formatDate(employee.fecha_ingreso)}`);
+        }
+
+        // Eliminar empleado
+        function deleteEmployee(userId) {
+            const employee = employees.find(emp => emp.id_usuario == userId);
+            if (!employee) return;
+
+            // No permitir eliminar al usuario actual
+            if (userId == currentUser.id) {
+                alert('❌ No puedes eliminar tu propia cuenta');
+                return;
+            }
+
+            userToDelete = userId;
+            document.getElementById('deleteMessage').textContent = 
+                `¿Estás seguro de que deseas eliminar al usuario "${employee.nombre}"? Esta acción no se puede deshacer.`;
+            
+            openModal('deleteModal');
+        }
+
+        // Confirmar eliminación
+        function confirmDelete() {
+            if (!userToDelete) return;
+
+            const employeeIndex = employees.findIndex(emp => emp.id_usuario == userToDelete);
+            if (employeeIndex !== -1) {
+                const employeeName = employees[employeeIndex].nombre;
+                employees.splice(employeeIndex, 1);
+                
+                closeModal('deleteModal');
+                renderEmployees();
+                updateStats();
+                userToDelete = null;
+                
+                alert(`🗑️ Usuario ${employeeName} eliminado exitosamente`);
+            }
+        }
+
+        // Filtrar empleados
         function filterEmployees() {
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
             const employeeCards = document.querySelectorAll('.employee-card');
             
             employeeCards.forEach(card => {
                 const name = card.getAttribute('data-name');
-                const position = card.getAttribute('data-position');
+                const email = card.getAttribute('data-email');
+                const phone = card.getAttribute('data-phone');
                 
-                if (name.includes(searchTerm) || position.includes(searchTerm)) {
+                if (name.includes(searchTerm) || email.includes(searchTerm) || phone.includes(searchTerm)) {
                     card.style.display = 'block';
                 } else {
                     card.style.display = 'none';
@@ -249,53 +519,36 @@
             });
         }
 
-        // Función para agregar empleado rápido
-        function quickAddEmployee() {
-            const name = document.getElementById('quickName').value;
-            const position = document.getElementById('quickPosition').value;
+        // Generar reporte
+        function generateReport() {
+            const total = employees.length;
+            const active = employees.filter(emp => emp.activo == 1).length;
+            const inactive = total - active;
+            const admins = employees.filter(emp => emp.id_rol == 1).length;
+            const waiters = employees.filter(emp => emp.id_rol == 2).length;
+
+            alert(`📈 REPORTE DE USUARIOS - CONTAINER BAR
             
-            if (name && position) {
-                alert(`✅ Empleado ${name} agregado como ${position}`);
-                document.getElementById('quickName').value = '';
-                document.getElementById('quickPosition').value = '';
-                updateStats();
-            } else {
-                alert('⚠️ Por favor completa todos los campos');
-            }
+📊 Resumen General:
+• Total de usuarios: ${total}
+• Usuarios activos: ${active}
+• Usuarios inactivos: ${inactive}
+
+👥 Por Roles:
+• Administradores: ${admins}
+• Meseros: ${waiters}
+
+📅 Fecha del reporte: ${new Date().toLocaleDateString('es-CO')}`);
         }
 
-        // Función para agregar empleado completo
-        function addEmployee() {
-            const name = document.getElementById('modalName').value;
-            const email = document.getElementById('modalEmail').value;
-            const phone = document.getElementById('modalPhone').value;
-            const position = document.getElementById('modalPosition').value;
-            const status = document.getElementById('modalStatus').value;
-            
-            if (name && email && position) {
-                alert(`✅ Empleado ${name} agregado exitosamente`);
-                closeModal('addEmployeeModal');
-                // Limpiar formulario
-                document.getElementById('modalName').value = '';
-                document.getElementById('modalEmail').value = '';
-                document.getElementById('modalPhone').value = '';
-                document.getElementById('modalPosition').value = '';
-                document.getElementById('modalStatus').value = 'active';
-                updateStats();
-            } else {
-                alert('⚠️ Por favor completa los campos obligatorios');
-            }
+        // Formatear fecha
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('es-CO');
         }
 
-        // Función para actualizar estadísticas
-        function updateStats() {
-            const currentTotal = parseInt(document.getElementById('totalEmployees').textContent);
-            document.getElementById('totalEmployees').textContent = currentTotal + 1;
-        }
-
-        // Agregar efectos de hover y animaciones
+        // Animaciones de entrada
         document.addEventListener('DOMContentLoaded', function() {
-            // Animación de entrada para las tarjetas
             const cards = document.querySelectorAll('.employee-card, .stat-card');
             cards.forEach((card, index) => {
                 card.style.opacity = '0';
@@ -307,21 +560,6 @@
                 }, index * 100);
             });
         });
-
-        // Funciones adicionales para los botones de acción
-        function editEmployee(name) {
-            alert(`✏️ Editando empleado: ${name}`);
-        }
-
-        function viewSchedule(name) {
-            alert(`📅 Viendo horarios de: ${name}`);
-        }
-
-        function deleteEmployee(name) {
-            if (confirm(`¿Estás seguro de eliminar a ${name}?`)) {
-                alert(`🗑️ Empleado ${name} eliminado`);
-            }
-        }
     </script>
 </body>
 </html>

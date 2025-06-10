@@ -74,6 +74,7 @@ $router->get('/admin/seguridad', [DashboardController::class, 'seguridad']);
 $router->post('/admin/seguridad', [DashboardController::class, 'updateSeguridad']);
 
 
+
 $router->get('/admin/mesas', [DashboardController::class, 'mesas']);
 $router->post('/admin/seguridad', [DashboardController::class, 'updateSeguridad']);
 
