@@ -34,11 +34,22 @@ $router->get('/dashboard', [DashboardController::class, 'index']);
 $router->get('/admin/stock', [DashboardController::class, 'controlStock']);
 $router->post('/admin/stock', [DashboardController::class, 'updateStock']);
 
-// Gestión de Empleados
+// GESTIÓN DE EMPLEADOS - RUTAS COMPLETAS
+// Ruta principal (GET) - Muestra la página de gestión con todos los empleados
 $router->get('/admin/empleados', [DashboardController::class, 'empleados']);
-$router->post('/admin/empleados', [DashboardController::class, 'createEmpleado']);
+
+// Ruta principal (POST) - Maneja peticiones AJAX para acciones dinámicas
+$router->post('/admin/empleados', [DashboardController::class, 'empleados']);
+
+// Rutas específicas para compatibilidad con formularios tradicionales
+$router->post('/admin/empleados/create', [DashboardController::class, 'createEmpleado']);
 $router->post('/admin/empleados/update', [DashboardController::class, 'updateEmpleado']);
 $router->post('/admin/empleados/delete', [DashboardController::class, 'deleteEmpleado']);
+
+// Rutas adicionales opcionales para funcionalidades específicas
+$router->get('/admin/empleados/search', [DashboardController::class, 'empleados']); // Para búsquedas con GET
+$router->get('/admin/empleados/edit/{id}', [DashboardController::class, 'empleados']); // Para editar específico
+
 
 // Pagos de Empleados
 $router->get('/admin/pagos', [DashboardController::class, 'pagosEmpleados']);
@@ -61,9 +72,14 @@ $router->post('/admin/categorias/delete', [DashboardController::class, 'deleteCa
 $router->get('/admin/reportes', [DashboardController::class, 'reportes']);
 $router->post('/admin/reportes/generar', [DashboardController::class, 'generarReporte']);
 
-// Control de Ventas
+// Control de Ventas - Router corregido
+// Solo necesitas una ruta que maneje tanto GET como POST
 $router->get('/admin/ventas', [DashboardController::class, 'ventasControl']);
-$router->post('/admin/ventas', [DashboardController::class, 'procesarVenta']);
+$router->post('/admin/ventas', [DashboardController::class, 'ventasControl']);
+
+// O alternativamente, si prefieres separar la lógica:
+// $router->get('/admin/ventas', [DashboardController::class, 'ventasControl']);
+// $router->post('/admin/ventas/procesar', [DashboardController::class, 'ventasControl']);
 
 // Configuración del Sistema
 $router->get('/admin/configuracion', [DashboardController::class, 'configuracion']);

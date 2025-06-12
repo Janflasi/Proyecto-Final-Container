@@ -195,11 +195,443 @@ class DashboardController {
         }
     }
 
-    public static function empleados(Router $router) {
-        $router->render('dashboard/Empleados', [
-            "title" => "Gestión de Empleados"
-        ]);
+    
+
+// GESTIÓN DE EMPLEADOS - MÉTODO PRINCIPAL
+public static function empleados(Router $router) {
+    $database = new Database();
+    $pdo = $database->getConnection();
+    
+    $mensaje = '';
+    $tipo_mensaje = '';
+    
+    // Manejar peticiones AJAX/POST
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+        header('Content-Type: application/json');
+        
+        try {
+            $response = ['success' => false, 'message' => 'Acción no válida'];
+            
+            switch ($_POST['action']) {
+                case 'add':
+                    $response['success'] = self::addEmpleado($pdo, $_POST);
+                    $response['message'] = $response['success'] ? 'Empleado agregado exitosamente' : 'Error al agregar empleado';
+                    break;
+                    
+                case 'update':
+                    $response['success'] = self::updateEmpleadoData($pdo, $_POST['id'], $_POST);
+                    $response['message'] = $response['success'] ? 'Empleado actualizado exitosamente' : 'Error al actualizar empleado';
+                    break;
+                    
+                case 'delete':
+                    $response['success'] = self::deleteEmpleadoData($pdo, $_POST['id']);
+                    $response['message'] = $response['success'] ? 'Empleado eliminado exitosamente' : 'Error al eliminar empleado';
+                    break;
+                    
+                case 'get':
+                    $response = self::getEmpleadoById($pdo, $_POST['id']);
+                    break;
+                    
+                case 'search':
+                    $busqueda = $_POST['busqueda'] ?? '';
+                    $response = ['success' => true, 'data' => self::getEmpleados($pdo, $busqueda)];
+                    break;
+            }
+            
+            echo json_encode($response);
+            exit;
+            
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            exit;
+        }
     }
+    
+    // Manejar mensajes de GET (redirecciones)
+    if (isset($_GET['success'])) {
+        $mensaje = $_GET['success'];
+        $tipo_mensaje = 'success';
+    } elseif (isset($_GET['error'])) {
+        $mensaje = $_GET['error'];
+        $tipo_mensaje = 'error';
+    }
+    
+    // Obtener empleado para editar
+    $empleado_editar = null;
+    if (isset($_GET['editar'])) {
+        $id_editar = $_GET['editar'];
+        try {
+            $empleado_editar = self::getEmpleadoById($pdo, $id_editar);
+        } catch(PDOException $e) {
+            $mensaje = "Error al cargar empleado: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    }
+    
+    // Obtener datos para la vista
+    $busqueda = $_GET['search'] ?? '';
+    $empleados = self::getEmpleados($pdo, $busqueda);
+    $cargos = self::getCargos($pdo);
+    $estadisticas = self::getEstadisticasEmpleados($pdo);
+    
+    $router->render('dashboard/Empleados', [
+        "title" => "Gestión de Empleados",
+        "empleados" => $empleados,
+        "cargos" => $cargos,
+        "estadisticas" => $estadisticas,
+        "mensaje" => $mensaje,
+        "tipo_mensaje" => $tipo_mensaje,
+        "empleado_editar" => $empleado_editar,
+        "busqueda" => $busqueda
+    ]);
+}
+
+// FUNCIONES AUXILIARES PARA EMPLEADOS
+private static function getEmpleados($pdo, $busqueda = '') {
+    try {
+        $sql = "SELECT e.*, c.nombre_cargo, c.salario_base 
+                FROM empleados e 
+                LEFT JOIN cargos c ON e.id_cargo = c.id_cargo 
+                WHERE e.activo = 1";
+        
+        if (!empty($busqueda)) {
+            $sql .= " AND (e.nombre LIKE :busqueda OR e.apellido LIKE :busqueda OR e.cedula LIKE :busqueda OR e.telefono LIKE :busqueda)";
+        }
+        
+        $sql .= " ORDER BY e.nombre, e.apellido";
+        
+        $stmt = $pdo->prepare($sql);
+        if (!empty($busqueda)) {
+            $stmt->bindValue(':busqueda', '%' . $busqueda . '%');
+        }
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+private static function getCargos($pdo) {
+    try {
+        $stmt = $pdo->query("SELECT * FROM cargos ORDER BY nombre_cargo");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+private static function getEstadisticasEmpleados($pdo) {
+    try {
+        $sql = "SELECT 
+                    COUNT(*) as total_empleados,
+                    COUNT(CASE WHEN estado = 'activo' THEN 1 END) as activos,
+                    COUNT(CASE WHEN estado = 'inactivo' THEN 1 END) as inactivos,
+                    COUNT(CASE WHEN estado = 'vacaciones' THEN 1 END) as en_vacaciones
+                FROM empleados WHERE activo = 1";
+        
+        $stmt = $pdo->query($sql);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return ['total_empleados' => 0, 'activos' => 0, 'inactivos' => 0, 'en_vacaciones' => 0];
+    }
+}
+
+private static function addEmpleado($pdo, $data) {
+    try {
+        // Validaciones básicas
+        if (empty($data['nombre']) || empty($data['apellido']) || empty($data['cedula'])) {
+            throw new Exception('Los campos nombre, apellido y cédula son obligatorios');
+        }
+        
+        // Verificar si la cédula ya existe
+        $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM empleados WHERE cedula = ? AND activo = 1");
+        $stmt_check->execute([$data['cedula']]);
+        if ($stmt_check->fetchColumn() > 0) {
+            throw new Exception('Ya existe un empleado con esta cédula');
+        }
+        
+        // Verificar si el teléfono ya existe (si se proporciona)
+        if (!empty($data['telefono'])) {
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM empleados WHERE telefono = ? AND activo = 1");
+            $stmt_check->execute([$data['telefono']]);
+            if ($stmt_check->fetchColumn() > 0) {
+                throw new Exception('Ya existe un empleado con este teléfono');
+            }
+        }
+        
+        // Verificar si el email ya existe (si se proporciona)
+        if (!empty($data['email'])) {
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM empleados WHERE email = ? AND activo = 1");
+            $stmt_check->execute([$data['email']]);
+            if ($stmt_check->fetchColumn() > 0) {
+                throw new Exception('Ya existe un empleado con este email');
+            }
+        }
+        
+        $pdo->beginTransaction();
+        
+        $sql = "INSERT INTO empleados (nombre, apellido, cedula, telefono, email, direccion, fecha_nacimiento, fecha_ingreso, id_cargo, salario, estado, observaciones) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        
+        $stmt = $pdo->prepare($sql);
+        $resultado = $stmt->execute([
+            trim($data['nombre']),
+            trim($data['apellido']),
+            trim($data['cedula']),
+            trim($data['telefono'] ?? ''),
+            trim($data['email'] ?? ''),
+            trim($data['direccion'] ?? ''),
+            $data['fecha_nacimiento'] ?? null,
+            $data['fecha_ingreso'] ?? date('Y-m-d'),
+            $data['id_cargo'] ?? null,
+            $data['salario'] ?? 0,
+            $data['estado'] ?? 'activo',
+            trim($data['observaciones'] ?? '')
+        ]);
+        
+        if ($resultado) {
+            // Registrar en gastos como nuevo empleado
+            $concepto = "Nuevo empleado: " . $data['nombre'] . " " . $data['apellido'];
+            $sql_gasto = "INSERT INTO gastos (fecha_gasto, concepto, monto, categoria_gasto, descripcion) 
+                         VALUES (NOW(), ?, 0, 'Empleados', 'Registro de nuevo empleado')";
+            $stmt_gasto = $pdo->prepare($sql_gasto);
+            $stmt_gasto->execute([$concepto]);
+            
+            $pdo->commit();
+            return true;
+        } else {
+            $pdo->rollback();
+            return false;
+        }
+        
+    } catch (Exception $e) {
+        $pdo->rollback();
+        throw $e;
+    }
+}
+
+private static function updateEmpleadoData($pdo, $id, $data) {
+    try {
+        // Validaciones básicas
+        if (empty($data['nombre']) || empty($data['apellido']) || empty($data['cedula'])) {
+            throw new Exception('Los campos nombre, apellido y cédula son obligatorios');
+        }
+        
+        // Verificar si la cédula ya existe en otro empleado
+        $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM empleados WHERE cedula = ? AND id_empleado != ? AND activo = 1");
+        $stmt_check->execute([$data['cedula'], $id]);
+        if ($stmt_check->fetchColumn() > 0) {
+            throw new Exception('Ya existe otro empleado con esta cédula');
+        }
+        
+        // Verificar si el teléfono ya existe en otro empleado (si se proporciona)
+        if (!empty($data['telefono'])) {
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM empleados WHERE telefono = ? AND id_empleado != ? AND activo = 1");
+            $stmt_check->execute([$data['telefono'], $id]);
+            if ($stmt_check->fetchColumn() > 0) {
+                throw new Exception('Ya existe otro empleado con este teléfono');
+            }
+        }
+        
+        // Verificar si el email ya existe en otro empleado (si se proporciona)
+        if (!empty($data['email'])) {
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM empleados WHERE email = ? AND id_empleado != ? AND activo = 1");
+            $stmt_check->execute([$data['email'], $id]);
+            if ($stmt_check->fetchColumn() > 0) {
+                throw new Exception('Ya existe otro empleado con este email');
+            }
+        }
+        
+        $pdo->beginTransaction();
+        
+        // Obtener datos actuales del empleado
+        $stmt_actual = $pdo->prepare("SELECT nombre, apellido FROM empleados WHERE id_empleado = ?");
+        $stmt_actual->execute([$id]);
+        $empleado_actual = $stmt_actual->fetch(PDO::FETCH_ASSOC);
+        
+        $sql = "UPDATE empleados SET 
+                nombre = ?, apellido = ?, cedula = ?, telefono = ?, email = ?, 
+                direccion = ?, fecha_nacimiento = ?, fecha_ingreso = ?, id_cargo = ?, 
+                salario = ?, estado = ?, observaciones = ?
+                WHERE id_empleado = ?";
+        
+        $stmt = $pdo->prepare($sql);
+        $resultado = $stmt->execute([
+            trim($data['nombre']),
+            trim($data['apellido']),
+            trim($data['cedula']),
+            trim($data['telefono'] ?? ''),
+            trim($data['email'] ?? ''),
+            trim($data['direccion'] ?? ''),
+            $data['fecha_nacimiento'] ?? null,
+            $data['fecha_ingreso'] ?? null,
+            $data['id_cargo'] ?? null,
+            $data['salario'] ?? 0,
+            $data['estado'] ?? 'activo',
+            trim($data['observaciones'] ?? ''),
+            $id
+        ]);
+        
+        if ($resultado) {
+            // Registrar el cambio en gastos
+            $concepto = "Actualización empleado: " . $empleado_actual['nombre'] . " " . $empleado_actual['apellido'];
+            $sql_gasto = "INSERT INTO gastos (fecha_gasto, concepto, monto, categoria_gasto, descripcion) 
+                         VALUES (NOW(), ?, 0, 'Empleados', 'Actualización de datos de empleado')";
+            $stmt_gasto = $pdo->prepare($sql_gasto);
+            $stmt_gasto->execute([$concepto]);
+            
+            $pdo->commit();
+            return true;
+        } else {
+            $pdo->rollback();
+            return false;
+        }
+        
+    } catch (Exception $e) {
+        $pdo->rollback();
+        throw $e;
+    }
+}
+
+private static function deleteEmpleadoData($pdo, $id) {
+    try {
+        $pdo->beginTransaction();
+        
+        // Obtener datos del empleado antes de eliminarlo
+        $stmt_empleado = $pdo->prepare("SELECT nombre, apellido FROM empleados WHERE id_empleado = ?");
+        $stmt_empleado->execute([$id]);
+        $empleado = $stmt_empleado->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$empleado) {
+            throw new Exception('Empleado no encontrado');
+        }
+        
+        // Marcar como inactivo en lugar de eliminar físicamente
+        $stmt = $pdo->prepare("UPDATE empleados SET activo = 0, estado = 'inactivo' WHERE id_empleado = ?");
+        $resultado = $stmt->execute([$id]);
+        
+        if ($resultado) {
+            // Registrar la eliminación en gastos
+            $concepto = "Eliminación empleado: " . $empleado['nombre'] . " " . $empleado['apellido'];
+            $sql_gasto = "INSERT INTO gastos (fecha_gasto, concepto, monto, categoria_gasto, descripcion) 
+                         VALUES (NOW(), ?, 0, 'Empleados', 'Empleado dado de baja')";
+            $stmt_gasto = $pdo->prepare($sql_gasto);
+            $stmt_gasto->execute([$concepto]);
+            
+            $pdo->commit();
+            return true;
+        } else {
+            $pdo->rollback();
+            return false;
+        }
+        
+    } catch (Exception $e) {
+        $pdo->rollback();
+        throw $e;
+    }
+}
+
+private static function getEmpleadoById($pdo, $id) {
+    try {
+        $stmt = $pdo->prepare("SELECT e.*, c.nombre_cargo FROM empleados e LEFT JOIN cargos c ON e.id_cargo = c.id_cargo WHERE e.id_empleado = ?");
+        $stmt->execute([$id]);
+        $empleado = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($empleado) {
+            return ['success' => true, 'data' => $empleado];
+        } else {
+            return ['success' => false, 'message' => 'Empleado no encontrado'];
+        }
+    } catch (Exception $e) {
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+// Métodos para compatibilidad con rutas separadas
+public static function createEmpleado(Router $router) {
+    if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+        $database = new Database();
+        $pdo = $database->getConnection();
+        
+        try {
+            $resultado = self::addEmpleado($pdo, $_POST);
+            
+            if ($resultado) {
+                header('Location: /admin/empleados?success=' . urlencode('Empleado creado exitosamente'));
+            } else {
+                header('Location: /admin/empleados?error=' . urlencode('Error al crear empleado'));
+            }
+        } catch (Exception $e) {
+            header('Location: /admin/empleados?error=' . urlencode($e->getMessage()));
+        }
+        exit;
+    }
+    
+    header('Location: /admin/empleados');
+    exit;
+}
+
+public static function updateEmpleado(Router $router) {
+    if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+        $database = new Database();
+        $pdo = $database->getConnection();
+        
+        $id = $_POST['id'] ?? '';
+        
+        if (empty($id)) {
+            header('Location: /admin/empleados?error=' . urlencode('ID de empleado no válido'));
+            exit;
+        }
+        
+        try {
+            $resultado = self::updateEmpleadoData($pdo, $id, $_POST);
+            
+            if ($resultado) {
+                header('Location: /admin/empleados?success=' . urlencode('Empleado actualizado exitosamente'));
+            } else {
+                header('Location: /admin/empleados?error=' . urlencode('Error al actualizar empleado'));
+            }
+        } catch (Exception $e) {
+            header('Location: /admin/empleados?error=' . urlencode($e->getMessage()));
+        }
+        exit;
+    }
+    
+    header('Location: /admin/empleados');
+    exit;
+}
+
+public static function deleteEmpleado(Router $router) {
+    if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+        $database = new Database();
+        $pdo = $database->getConnection();
+        
+        $id = $_POST['id'] ?? '';
+        
+        if (empty($id)) {
+            header('Location: /admin/empleados?error=' . urlencode('ID de empleado no válido'));
+            exit;
+        }
+        
+        try {
+            $resultado = self::deleteEmpleadoData($pdo, $id);
+            
+            if ($resultado) {
+                header('Location: /admin/empleados?success=' . urlencode('Empleado eliminado exitosamente'));
+            } else {
+                header('Location: /admin/empleados?error=' . urlencode('Error al eliminar empleado'));
+            }
+        } catch (Exception $e) {
+            header('Location: /admin/empleados?error=' . urlencode($e->getMessage()));
+        }
+        exit;
+    }
+    
+    header('Location: /admin/empleados');
+    exit;
+}
+
+
 
     public static function pagosEmpleados(Router $router) {
         $router->render('dashboard/PagosEmpleados', [
@@ -654,12 +1086,160 @@ class DashboardController {
         ]);
     }
 
-    public static function ventasControl(Router $router) {
-        $router->render('dashboard/ventas_control', [
-            "title" => "Control de Ventas"
-        ]);
+  public static function ventasControl(Router $router) {
+    
+    // Procesar peticiones AJAX
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Content-Type: application/json');
+        
+        $accion = $_POST['accion'] ?? '';
+        
+        switch ($accion) {
+            case 'obtenerVentas':
+                $fechaDesde = $_POST['fechaDesde'] ?? null;
+                $fechaHasta = $_POST['fechaHasta'] ?? null;
+                $estado = $_POST['estado'] ?? null;
+                $busqueda = $_POST['busqueda'] ?? null;
+                
+                $ventas = self::obtenerVentas($fechaDesde, $fechaHasta, $estado, $busqueda);
+                $estadisticas = self::obtenerEstadisticas($fechaDesde, $fechaHasta, $estado, $busqueda);
+                
+                echo json_encode([
+                    'ventas' => $ventas,
+                    'estadisticas' => $estadisticas,
+                    'success' => true
+                ]);
+                exit;
+                
+            case 'obtenerDetalle':
+                $idVenta = $_POST['idVenta'] ?? null;
+                if ($idVenta) {
+                    $detalle = self::obtenerDetalleVenta($idVenta);
+                    echo json_encode([
+                        'detalle' => $detalle,
+                        'success' => true
+                    ]);
+                } else {
+                    echo json_encode(['success' => false, 'mensaje' => 'ID de venta requerido']);
+                }
+                exit;
+                
+            case 'actualizarEstado':
+                $idVenta = $_POST['idVenta'] ?? null;
+                $nuevoEstado = $_POST['nuevoEstado'] ?? null;
+                
+                if ($idVenta && $nuevoEstado) {
+                    $resultado = self::actualizarEstadoVenta($idVenta, $nuevoEstado);
+                    echo json_encode([
+                        'success' => $resultado,
+                        'mensaje' => $resultado ? 'Estado actualizado correctamente' : 'Error al actualizar estado'
+                    ]);
+                } else {
+                    echo json_encode(['success' => false, 'mensaje' => 'Datos incompletos']);
+                }
+                exit;
+        }
     }
+    
+    // Obtener datos iniciales para la vista
+    $ventasIniciales = self::obtenerVentas();
+    $estadisticasIniciales = self::obtenerEstadisticas();
+    
+    $router->render('dashboard/ventas_control', [
+        "title" => "Control de Ventas",
+        "ventasIniciales" => $ventasIniciales,
+        "estadisticasIniciales" => $estadisticasIniciales
+    ]);
+}
 
+// Método para obtener ventas con filtros
+private static function obtenerVentas($fechaDesde = null, $fechaHasta = null, $estado = null, $busqueda = null) {
+    $database = new Database();
+    $conn = $database->getConnection();
+    
+    $sql = "SELECT v.id_venta, v.fecha_venta, m.numero_mesa, u.nombre as mesero, v.total, v.estado
+            FROM ventas v 
+            JOIN mesas m ON v.id_mesa = m.id_mesa 
+            JOIN usuarios u ON v.id_usuario = u.id_usuario 
+            WHERE 1=1";
+    
+    $params = [];
+    
+    if ($fechaDesde) {
+        $sql .= " AND DATE(v.fecha_venta) >= :fechaDesde";
+        $params[':fechaDesde'] = $fechaDesde;
+    }
+    
+    if ($fechaHasta) {
+        $sql .= " AND DATE(v.fecha_venta) <= :fechaHasta";
+        $params[':fechaHasta'] = $fechaHasta;
+    }
+    
+    if ($estado) {
+        $sql .= " AND v.estado = :estado";
+        $params[':estado'] = $estado;
+    }
+    
+    if ($busqueda) {
+        $sql .= " AND (m.numero_mesa LIKE :busqueda OR u.nombre LIKE :busqueda OR v.total LIKE :busqueda OR v.id_venta LIKE :busqueda)";
+        $params[':busqueda'] = "%$busqueda%";
+    }
+    
+    $sql .= " ORDER BY v.fecha_venta DESC";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Método para obtener detalle de una venta específica
+private static function obtenerDetalleVenta($idVenta) {
+    $database = new Database();
+    $conn = $database->getConnection();
+    
+    $sql = "SELECT v.id_venta, v.fecha_venta, m.numero_mesa, u.nombre as mesero, v.total, v.estado,
+                   dv.cantidad, dv.precio_unitario, dv.subtotal, p.nombre_producto
+            FROM ventas v 
+            JOIN mesas m ON v.id_mesa = m.id_mesa 
+            JOIN usuarios u ON v.id_usuario = u.id_usuario 
+            JOIN detalle_ventas dv ON v.id_venta = dv.id_venta
+            JOIN productos p ON dv.id_producto = p.id_producto
+            WHERE v.id_venta = :idVenta";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bindParam(':idVenta', $idVenta);
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Método para actualizar el estado de una venta
+private static function actualizarEstadoVenta($idVenta, $nuevoEstado) {
+    $database = new Database();
+    $conn = $database->getConnection();
+    
+    $sql = "UPDATE ventas SET estado = :estado WHERE id_venta = :idVenta";
+    $stmt = $conn->prepare($sql);
+    $stmt->bindParam(':estado', $nuevoEstado);
+    $stmt->bindParam(':idVenta', $idVenta);
+    return $stmt->execute();
+}
+
+// Método para obtener estadísticas
+private static function obtenerEstadisticas($fechaDesde = null, $fechaHasta = null, $estado = null, $busqueda = null) {
+    $ventas = self::obtenerVentas($fechaDesde, $fechaHasta, $estado, $busqueda);
+    
+    $totalVentas = array_sum(array_column($ventas, 'total'));
+    $totalTransacciones = count($ventas);
+    $pendientes = count(array_filter($ventas, function($v) { return $v['estado'] == 'pendiente'; }));
+    $completadas = count(array_filter($ventas, function($v) { return $v['estado'] == 'completada'; }));
+    
+    return [
+        'totalVentas' => $totalVentas,
+        'totalTransacciones' => $totalTransacciones,
+        'pendientes' => $pendientes,
+        'completadas' => $completadas
+    ];
+}
     public static function configuracion(Router $router) {
         $router->render('dashboard/configuracion', [
             "title" => "Configuración del Sistema"

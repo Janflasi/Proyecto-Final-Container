@@ -1,591 +1,568 @@
+<?php
+// Configuración de errores - solo para desarrollo
+error_reporting(E_ALL);
+ini_set('display_errors', 0); // Cambiado a 0 para AJAX
+ini_set('log_errors', 1);
+
+function sendJsonResponse($data, $httpCode = 200) {
+    // Limpiar cualquier buffer de salida
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    http_response_code($httpCode);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-cache, must-revalidate');
+    header('Access-Control-Allow-Origin: *');
+    
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        $json = json_encode(['success' => false, 'mensaje' => 'Error de codificación JSON: ' . json_last_error_msg()]);
+    }
+    
+    echo $json;
+    exit;
+}
+
+// Procesar AJAX con debugging mejorado
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        // Iniciar buffer de salida para capturar errores
+        ob_start();
+        
+        if (!isset($_POST['accion'])) {
+            sendJsonResponse(['success' => false, 'mensaje' => 'Acción no especificada'], 400);
+        }
+        
+        // Verificar si existe el archivo de conexión
+        if (!file_exists('config/Conexion.php')) {
+            sendJsonResponse(['success' => false, 'mensaje' => 'Archivo de configuración no encontrado'], 500);
+        }
+        
+        require_once 'config/Conexion.php';
+        
+        // Verificar si la clase Database existe
+        if (!class_exists('Database')) {
+            sendJsonResponse(['success' => false, 'mensaje' => 'Clase Database no encontrada'], 500);
+        }
+        
+        $historial = new HistorialVentas();
+        
+        switch ($_POST['accion']) {
+            case 'obtenerVentas':
+                $params = ['fechaDesde', 'fechaHasta', 'estado', 'busqueda'];
+                $filters = array_filter(array_intersect_key($_POST, array_flip($params)), fn($v) => !empty($v));
+                
+                $ventas = $historial->obtenerVentas(...array_pad(array_values($filters), 4, null));
+                $estadisticas = $historial->obtenerEstadisticas(...array_pad(array_values($filters), 4, null));
+                
+                sendJsonResponse(['ventas' => $ventas, 'estadisticas' => $estadisticas, 'success' => true]);
+                break;
+                
+            case 'obtenerDetalle':
+                $idVenta = (int)($_POST['idVenta'] ?? 0);
+                if (!$idVenta) sendJsonResponse(['success' => false, 'mensaje' => 'ID de venta requerido'], 400);
+                
+                sendJsonResponse(['detalle' => $historial->obtenerDetalleVenta($idVenta), 'success' => true]);
+                break;
+                
+            case 'actualizarEstado':
+                $idVenta = (int)($_POST['idVenta'] ?? 0);
+                $nuevoEstado = $_POST['nuevoEstado'] ?? '';
+                
+                if (!$idVenta || !$nuevoEstado) {
+                    sendJsonResponse(['success' => false, 'mensaje' => 'Datos incompletos'], 400);
+                }
+                
+                if (!in_array($nuevoEstado, ['pendiente', 'completada', 'cancelada'])) {
+                    sendJsonResponse(['success' => false, 'mensaje' => 'Estado no válido'], 400);
+                }
+                
+                $resultado = $historial->actualizarEstadoVenta($idVenta, $nuevoEstado);
+                sendJsonResponse([
+                    'success' => $resultado,
+                    'mensaje' => $resultado ? 'Estado actualizado correctamente' : 'Error al actualizar estado'
+                ]);
+                break;
+                
+            default:
+                sendJsonResponse(['success' => false, 'mensaje' => 'Acción no válida'], 400);
+        }
+    } catch (Exception $e) {
+        // Capturar cualquier salida no deseada
+        $output = ob_get_clean();
+        
+        error_log("Error AJAX: " . $e->getMessage());
+        error_log("Output capturado: " . $output);
+        
+        sendJsonResponse([
+            'success' => false, 
+            'mensaje' => 'Error interno: ' . $e->getMessage(),
+            'debug' => $output // Solo para desarrollo
+        ], 500);
+    }
+}
+
+// Conexión solo para GET
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    require_once 'config/Conexion.php';
+}
+
+class HistorialVentas {
+    private $conn;
+    
+    public function __construct() {
+        $database = new Database();
+        $this->conn = $database->getConnection();
+        if (!$this->conn) throw new Exception("Error de conexión a BD");
+    }
+    
+    public function obtenerVentas($fechaDesde = null, $fechaHasta = null, $estado = null, $busqueda = null) {
+        try {
+            $sql = "SELECT v.id_venta, v.fecha_venta, m.numero_mesa, u.nombre as mesero, v.total, v.estado
+                    FROM ventas v 
+                    JOIN mesas m ON v.id_mesa = m.id_mesa 
+                    JOIN usuarios u ON v.id_usuario = u.id_usuario 
+                    WHERE 1=1";
+            
+            $params = [];
+            $conditions = [
+                'fechaDesde' => ['DATE(v.fecha_venta) >= :fechaDesde', $fechaDesde],
+                'fechaHasta' => ['DATE(v.fecha_venta) <= :fechaHasta', $fechaHasta],
+                'estado' => ['v.estado = :estado', $estado],
+                'busqueda' => ['(m.numero_mesa LIKE :busqueda OR u.nombre LIKE :busqueda OR v.total LIKE :busqueda OR v.id_venta LIKE :busqueda)', "%$busqueda%"]
+            ];
+            
+            foreach ($conditions as $key => $condition) {
+                if (!empty($condition[1])) {
+                    $sql .= " AND " . $condition[0];
+                    $params[":$key"] = $condition[1];
+                }
+            }
+            
+            $sql .= " ORDER BY v.fecha_venta DESC";
+            $stmt = $this->conn->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log("Error obtenerVentas: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    public function obtenerDetalleVenta($idVenta) {
+        try {
+            $sql = "SELECT v.id_venta, v.fecha_venta, m.numero_mesa, u.nombre as mesero, v.total, v.estado,
+                           dv.cantidad, dv.precio_unitario, dv.subtotal, p.nombre_producto
+                    FROM ventas v 
+                    JOIN mesas m ON v.id_mesa = m.id_mesa 
+                    JOIN usuarios u ON v.id_usuario = u.id_usuario 
+                    JOIN detalle_ventas dv ON v.id_venta = dv.id_venta
+                    JOIN productos p ON dv.id_producto = p.id_producto
+                    WHERE v.id_venta = :idVenta";
+            
+            $stmt = $this->conn->prepare($sql);
+            $stmt->bindParam(':idVenta', $idVenta, PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log("Error obtenerDetalleVenta: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    public function actualizarEstadoVenta($idVenta, $nuevoEstado) {
+        try {
+            $stmt = $this->conn->prepare("UPDATE ventas SET estado = :estado WHERE id_venta = :idVenta");
+            $stmt->bindParam(':estado', $nuevoEstado, PDO::PARAM_STR);
+            $stmt->bindParam(':idVenta', $idVenta, PDO::PARAM_INT);
+            return $stmt->execute();
+        } catch (Exception $e) {
+            error_log("Error actualizarEstadoVenta: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    public function obtenerEstadisticas($fechaDesde = null, $fechaHasta = null, $estado = null, $busqueda = null) {
+        $ventas = $this->obtenerVentas($fechaDesde, $fechaHasta, $estado, $busqueda);
+        $estadosCounts = array_count_values(array_column($ventas, 'estado'));
+        
+        return [
+            'totalVentas' => array_sum(array_column($ventas, 'total')),
+            'totalTransacciones' => count($ventas),
+            'pendientes' => $estadosCounts['pendiente'] ?? 0,
+            'completadas' => $estadosCounts['completada'] ?? 0
+        ];
+    }
+}
+
+// Datos iniciales
+$ventasIniciales = [];
+$estadisticasIniciales = ['totalVentas' => 0, 'totalTransacciones' => 0, 'pendientes' => 0, 'completadas' => 0];
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    try {
+        $historial = new HistorialVentas();
+        $ventasIniciales = $historial->obtenerVentas();
+        $estadisticasIniciales = $historial->obtenerEstadisticas();
+    } catch (Exception $e) {
+        error_log("Error datos iniciales: " . $e->getMessage());
+    }
+}
+?>
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Historial de Ventas - Container Bar</title>
-        <link rel="stylesheet" href="/style/style8.css">
-    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/style/style8.css">
 </head>
 <body>
     <div class="container">
-      <div class="header">
-    <div class="header-title">
-        <img src="/assets/unnamed.png" alt="Container Bar" class="header-logo">
-        <h1>Container Bar - Historial de Ventas</h1>
-    </div>
-    <p>Gestiona y analiza todas las ventas de tu container bar con reportes detallados</p>
-</div>
+        <div class="header">
+            <h1><i class="fas fa-shipping-fast"></i> Container Bar</h1>
+            <p>Historial de Ventas - Sistema de Inventario Contable</p>
+        </div>
 
-        <!-- Filtros -->
-        <div class="controls-section">
-            <div class="filters-grid">
-                <div class="filter-group">
-                    <label for="dateFrom">Fecha Desde</label>
-                    <input type="date" id="dateFrom" name="dateFrom">
-                </div>
-                <div class="filter-group">
-                    <label for="dateTo">Fecha Hasta</label>
-                    <input type="date" id="dateTo" name="dateTo">
-                </div>
-                <div class="filter-group">
-                    <label for="product">Producto</label>
-                    <select id="product" name="product">
-                        <option value="">Todos los productos</option>
-                        <option value="cerveza">Cerveza Artesanal</option>
-                        <option value="cocktail">Cocktail Premium</option>
-                        <option value="vino">Copa de Vino</option>
-                        <option value="whisky">Whisky Nacional</option>
-                        <option value="mojito">Mojito</option>
-                        <option value="pisco">Pisco Sour</option>
-                        <option value="nachos">Nachos</option>
-                        <option value="alitas">Alitas BBQ</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="employee">Bartender</label>
-                    <select id="employee" name="employee">
-                        <option value="">Todos los bartenders</option>
-                        <option value="juan">Juan Pérez</option>
-                        <option value="maria">María García</option>
-                        <option value="carlos">Carlos López</option>
-                        <option value="ana">Ana Martínez</option>
-                        <option value="luis">Luis Rodríguez</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="status">Estado</label>
-                    <select id="status" name="status">
-                        <option value="">Todos los estados</option>
-                        <option value="completed">Servida</option>
-                        <option value="pending">Preparando</option>
-                        <option value="cancelled">Cancelada</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="minAmount">Monto Mínimo</label>
-                    <input type="number" id="minAmount" name="minAmount" placeholder="$0.00" step="0.01">
-                </div>
-            </div>
-            <div class="filter-actions">
-                <button class="btn btn-primary" onclick="applyFilters()">
-                    🔍 Aplicar Filtros
-                </button>
-                <button class="btn btn-secondary" onclick="exportData()">
-                    📊 Exportar
-                </button>
-                <button class="btn btn-clear" onclick="clearFilters()">
-                    🗑️ Limpiar
+        <div class="controls">
+            <?php 
+            $controls = [
+                ['dateFrom', 'date', 'Fecha Desde:', '2024-05-01'],
+                ['dateTo', 'date', 'Fecha Hasta:', '2024-12-31'],
+                ['statusFilter', 'select', 'Estado:', '', [
+                    '' => 'Todos los estados',
+                    'pendiente' => 'Pendiente',
+                    'completada' => 'Completada',
+                    'cancelada' => 'Cancelada'
+                ]],
+                ['searchInput', 'text', 'Buscar:', '', [], 'Mesa, Usuario, Total...']
+            ];
+            
+            foreach ($controls as $control) {
+                echo '<div class="control-group">';
+                echo "<label for='{$control[0]}'>{$control[2]}</label>";
+                
+                if ($control[1] === 'select') {
+                    echo "<select id='{$control[0]}'>";
+                    foreach ($control[4] as $value => $text) {
+                        echo "<option value='$value'>$text</option>";
+                    }
+                    echo "</select>";
+                } else {
+                    $placeholder = isset($control[5]) ? "placeholder='{$control[5]}'" : '';
+                    $value = isset($control[3]) ? "value='{$control[3]}'" : '';
+                    echo "<input type='{$control[1]}' id='{$control[0]}' $value $placeholder>";
+                }
+                echo '</div>';
+            }
+            ?>
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-primary" onclick="filterSales()">
+                    <i class="fas fa-search"></i> Filtrar
                 </button>
             </div>
         </div>
 
-        <!-- Reportes -->
-        <div class="reports-section">
-            <div class="report-card active" onclick="showReport('daily')">
-                <h3>Ventas Diarias</h3>
-                <div class="report-value" id="dailySales">$2,450</div>
-                <div class="report-period">Hoy</div>
-            </div>
-            <div class="report-card" onclick="showReport('weekly')">
-                <h3>Ventas Semanales</h3>
-                <div class="report-value" id="weeklySales">$18,340</div>
-                <div class="report-period">Esta semana</div>
-            </div>
-            <div class="report-card" onclick="showReport('monthly')">
-                <h3>Ventas Mensuales</h3>
-                <div class="report-value" id="monthlySales">$87,620</div>
-                <div class="report-period">Este mes</div>
-            </div>
+        <div class="stats-grid">
+            <?php 
+            $stats = [
+                ['totalSales', 'fas fa-dollar-sign', '$' . number_format($estadisticasIniciales['totalVentas'], 0, ',', '.'), 'Total Ventas'],
+                ['totalTransactions', 'fas fa-chart-line', $estadisticasIniciales['totalTransacciones'], 'Transacciones'],
+                ['pendingSales', 'fas fa-clock', $estadisticasIniciales['pendientes'], 'Pendientes'],
+                ['completedSales', 'fas fa-check-circle', $estadisticasIniciales['completadas'], 'Completadas']
+            ];
+            
+            foreach ($stats as $stat) {
+                echo "<div class='stat-card'>
+                        <div class='icon'><i class='{$stat[1]}'></i></div>
+                        <div class='value' id='{$stat[0]}'>{$stat[2]}</div>
+                        <div class='label'>{$stat[3]}</div>
+                      </div>";
+            }
+            ?>
         </div>
 
-        <!-- Gráfico -->
-        <div class="chart-container">
-            <h3 id="chartTitle">📈 Ventas Diarias - Últimos 7 días</h3>
-            <canvas id="salesChart" width="400" height="200"></canvas>
-        </div>
-
-        <!-- Tabla de Ventas -->
-        <div class="sales-table-container">
+        <div class="sales-table">
             <div class="table-header">
-                <h2>Registro de Órdenes</h2>
-                <div class="table-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="refreshData()">
-                        🔄 Actualizar
-                    </button>
-                </div>
+                <i class="fas fa-receipt"></i>
+                <span>Historial de Ventas</span>
             </div>
-
-            <div class="loading" id="loading">
-                <p>Cargando datos...</p>
-            </div>
-
-            <table class="sales-table" id="salesTable">
+            <table>
                 <thead>
                     <tr>
-                        <th onclick="sortTable(0)">ID Orden</th>
-                        <th onclick="sortTable(1)">Fecha</th>
-                        <th onclick="sortTable(2)">Mesa</th>
-                        <th onclick="sortTable(3)">Producto</th>
-                        <th onclick="sortTable(4)">Bartender</th>
-                        <th onclick="sortTable(5)">Cantidad</th>
-                        <th onclick="sortTable(6)">Total</th>
-                        <th onclick="sortTable(7)">Estado</th>
+                        <?php 
+                        $headers = ['ID Venta', 'Fecha', 'Mesa', 'Mesero', 'Total', 'Estado', 'Acciones'];
+                        foreach ($headers as $header) {
+                            echo "<th>$header</th>";
+                        }
+                        ?>
                     </tr>
                 </thead>
-                <tbody id="salesTableBody">
-                    <!-- Los datos se cargarán aquí -->
-                </tbody>
+                <tbody id="salesTableBody"></tbody>
             </table>
+        </div>
 
-            <div class="pagination" id="pagination">
-                <!-- La paginación se generará aquí -->
+        <div class="pagination" id="pagination"></div>
+    </div>
+
+    <!-- Modal -->
+    <div id="saleModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-info-circle"></i> Detalles de Venta</h3>
+                <button class="close-btn" onclick="closeSaleModal()">&times;</button>
             </div>
+            <div id="saleDetails"></div>
         </div>
     </div>
 
+    <div id="alertContainer"></div>
+
     <script>
-        // Datos de ejemplo para container bar
-        let salesData = [
-            {id: 'O001', date: '2025-05-23', mesa: 'Mesa 1', product: 'Cerveza Artesanal', employee: 'María García', quantity: 3, total: 45.00, status: 'completed'},
-            {id: 'O002', date: '2025-05-23', mesa: 'Mesa 5', product: 'Cocktail Premium', employee: 'Juan Pérez', quantity: 2, total: 32.00, status: 'completed'},
-            {id: 'O003', date: '2025-05-23', mesa: 'Barra', product: 'Whisky Nacional', employee: 'Carlos López', quantity: 1, total: 18.00, status: 'pending'},
-            {id: 'O004', date: '2025-05-22', mesa: 'Mesa 3', product: 'Mojito', employee: 'Ana Martínez', quantity: 4, total: 56.00, status: 'completed'},
-            {id: 'O005', date: '2025-05-22', mesa: 'Mesa 7', product: 'Pisco Sour', employee: 'Luis Rodríguez', quantity: 2, total: 24.00, status: 'cancelled'},
-            {id: 'O006', date: '2025-05-21', mesa: 'Mesa 2', product: 'Copa de Vino', employee: 'María García', quantity: 2, total: 28.00, status: 'completed'},
-            {id: 'O007', date: '2025-05-21', mesa: 'Mesa 4', product: 'Nachos', employee: 'Juan Pérez', quantity: 1, total: 12.00, status: 'completed'},
-            {id: 'O008', date: '2025-05-20', mesa: 'Mesa 6', product: 'Alitas BBQ', employee: 'Carlos López', quantity: 2, total: 26.00, status: 'completed'},
-            {id: 'O009', date: '2025-05-20', mesa: 'Barra', product: 'Cerveza Artesanal', employee: 'Ana Martínez', quantity: 5, total: 75.00, status: 'completed'},
-            {id: 'O010', date: '2025-05-19', mesa: 'Mesa 8', product: 'Cocktail Premium', employee: 'Luis Rodríguez', quantity: 3, total: 48.00, status: 'pending'},
-            {id: 'O011', date: '2025-05-19', mesa: 'Mesa 1', product: 'Mojito', employee: 'María García', quantity: 2, total: 28.00, status: 'completed'},
-            {id: 'O012', date: '2025-05-18', mesa: 'Mesa 9', product: 'Pisco Sour', employee: 'Juan Pérez', quantity: 6, total: 72.00, status: 'completed'},
-            {id: 'O013', date: '2025-05-18', mesa: 'Barra', product: 'Whisky Nacional', employee: 'Carlos López', quantity: 2, total: 36.00, status: 'completed'},
-            {id: 'O014', date: '2025-05-17', mesa: 'Mesa 10', product: 'Copa de Vino', employee: 'Ana Martínez', quantity: 4, total: 56.00, status: 'completed'},
-            {id: 'O015', date: '2025-05-17', mesa: 'Mesa 2', product: 'Alitas BBQ', employee: 'Luis Rodríguez', quantity: 3, total: 39.00, status: 'completed'},
-            {id: 'O016', date: '2025-05-16', mesa: 'Mesa 3', product: 'Cerveza Artesanal', employee: 'María García', quantity: 4, total: 60.00, status: 'completed'},
-            {id: 'O017', date: '2025-05-16', mesa: 'Barra', product: 'Cocktail Premium', employee: 'Juan Pérez', quantity: 1, total: 16.00, status: 'completed'},
-            {id: 'O018', date: '2025-05-15', mesa: 'Mesa 5', product: 'Mojito', employee: 'Carlos López', quantity: 3, total: 42.00, status: 'completed'},
-            {id: 'O019', date: '2025-05-15', mesa: 'Mesa 7', product: 'Pisco Sour', employee: 'Ana Martínez', quantity: 2, total: 24.00, status: 'completed'},
-            {id: 'O020', date: '2025-05-14', mesa: 'Mesa 1', product: 'Copa de Vino', employee: 'Luis Rodríguez', quantity: 3, total: 42.00, status: 'completed'}
-        ];
-
-        let filteredData = [...salesData];
+        let salesData = <?php echo json_encode($ventasIniciales, JSON_UNESCAPED_UNICODE); ?>;
+        let filteredSales = [...salesData];
         let currentPage = 1;
-        let itemsPerPage = 10;
-        let sortColumn = 1;
-        let sortDirection = 'desc';
-        let currentReport = 'daily';
+        const itemsPerPage = 10;
 
-        // Inicializar
-        document.addEventListener('DOMContentLoaded', function() {
-            setDefaultDates();
-            renderTable();
-            updateReports();
-            drawChart();
-        });
-
-        function setDefaultDates() {
-            const today = new Date();
-            const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const showAlert = (message, type = 'info') => {
+            const alertContainer = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert ${type}`;
             
-            document.getElementById('dateFrom').value = lastWeek.toISOString().split('T')[0];
-            document.getElementById('dateTo').value = today.toISOString().split('T')[0];
-        }
-
-        function applyFilters() {
-            const dateFrom = document.getElementById('dateFrom').value;
-            const dateTo = document.getElementById('dateTo').value;
-            const product = document.getElementById('product').value;
-            const employee = document.getElementById('employee').value;
-            const status = document.getElementById('status').value;
-            const minAmount = parseFloat(document.getElementById('minAmount').value) || 0;
-
-            filteredData = salesData.filter(sale => {
-                const saleDate = new Date(sale.date);
-                const fromDate = dateFrom ? new Date(dateFrom) : new Date('1900-01-01');
-                const toDate = dateTo ? new Date(dateTo) : new Date('2100-12-31');
-
-                return (!dateFrom || saleDate >= fromDate) &&
-                       (!dateTo || saleDate <= toDate) &&
-                       (!product || sale.product.toLowerCase().includes(product)) &&
-                       (!employee || sale.employee.toLowerCase().includes(employee)) &&
-                       (!status || sale.status === status) &&
-                       (sale.total >= minAmount);
-            });
-
-            currentPage = 1;
-            renderTable();
-            updateReports();
-            drawChart();
-        }
-
-        function clearFilters() {
-            document.getElementById('dateFrom').value = '';
-            document.getElementById('dateTo').value = '';
-            document.getElementById('product').value = '';
-            document.getElementById('employee').value = '';
-            document.getElementById('status').value = '';
-            document.getElementById('minAmount').value = '';
+            const icons = {success: 'fas fa-check-circle', error: 'fas fa-exclamation-triangle', info: 'fas fa-info-circle'};
+            alert.innerHTML = `<i class="${icons[type]}"></i><span>${message}</span>`;
             
-            filteredData = [...salesData];
-            currentPage = 1;
-            setDefaultDates();
-            renderTable();
-            updateReports();
-            drawChart();
-        }
+            alertContainer.appendChild(alert);
+            setTimeout(() => alert.classList.add('show'), 100);
+            setTimeout(() => {
+                alert.classList.remove('show');
+                setTimeout(() => alertContainer.contains(alert) && alertContainer.removeChild(alert), 400);
+            }, 4000);
+        };
 
-        function renderTable() {
+        const formatCurrency = amount => new Intl.NumberFormat('es-CO', {
+            style: 'currency', currency: 'COP', minimumFractionDigits: 0
+        }).format(amount);
+
+        const formatDate = dateString => {
+            try {
+                return new Date(dateString).toLocaleString('es-CO', {
+                    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+                });
+            } catch (e) { return dateString; }
+        };
+
+        const updateStats = stats => {
+            try {
+                document.getElementById('totalSales').textContent = formatCurrency(stats.totalVentas || 0);
+                document.getElementById('totalTransactions').textContent = stats.totalTransacciones || 0;
+                document.getElementById('pendingSales').textContent = stats.pendientes || 0;
+                document.getElementById('completedSales').textContent = stats.completadas || 0;
+            } catch (e) { console.error('Error actualizando estadísticas:', e); }
+        };
+
+        const renderSalesTable = () => {
             const tbody = document.getElementById('salesTableBody');
-            const startIndex = (currentPage - 1) * itemsPerPage;
-            const endIndex = startIndex + itemsPerPage;
-            const pageData = filteredData.slice(startIndex, endIndex);
-
-            if (pageData.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="no-results">
-                            <h3>No se encontraron resultados</h3>
-                            <p>Intenta ajustar los filtros de búsqueda</p>
-                        </td>
-                    </tr>
-                `;
-            } else {
-                tbody.innerHTML = pageData.map(sale => `
-                    <tr>
-                        <td><strong>${sale.id}</strong></td>
-                        <td>${formatDate(sale.date)}</td>
-                        <td><span class="mesa-badge">🪑 ${sale.mesa}</span></td>
-                        <td>${sale.product}</td>
-                        <td>${sale.employee}</td>
-                        <td>${sale.quantity}</td>
-                        <td class="amount">$${sale.total.toFixed(2)}</td>
-                        <td><span class="status-badge status-${sale.status}">${getStatusText(sale.status)}</span></td>
-                    </tr>
-                `).join('');
+            
+            if (!filteredSales?.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No se encontraron ventas</td></tr>';
+                return;
             }
+            
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const paginatedSales = filteredSales.slice(startIndex, startIndex + itemsPerPage);
 
-            renderPagination();
-        }
+            tbody.innerHTML = paginatedSales.map(sale => `
+                <tr>
+                    <td>#${sale.id_venta || 'N/A'}</td>
+                    <td>${formatDate(sale.fecha_venta || '')}</td>
+                    <td>Mesa ${sale.numero_mesa || 'N/A'}</td>
+                    <td>${sale.mesero || 'N/A'}</td>
+                    <td>${formatCurrency(sale.total || 0)}</td>
+                    <td><span class="status ${sale.estado || 'pendiente'}">${sale.estado || 'pendiente'}</span></td>
+                    <td>
+                        <button class="btn btn-primary action-btn" onclick="viewSaleDetails(${sale.id_venta})">
+                            <i class="fas fa-eye"></i> Ver
+                        </button>
+                        ${sale.estado === 'pendiente' ? `
+                            <button class="btn btn-primary action-btn" onclick="updateSaleStatus(${sale.id_venta}, 'completada')">
+                                <i class="fas fa-check"></i> Completar
+                            </button>
+                        ` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        };
 
-        function renderPagination() {
-            const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+        const renderPagination = () => {
+            const totalPages = Math.ceil(filteredSales.length / itemsPerPage);
             const pagination = document.getElementById('pagination');
-
+            
             if (totalPages <= 1) {
                 pagination.innerHTML = '';
                 return;
             }
-
-            let paginationHTML = `
-                <button onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
-                    ‹ Anterior
-                </button>
-            `;
-
+            
+            let html = '';
+            if (currentPage > 1) {
+                html += `<button class="page-btn" onclick="changePage(${currentPage - 1})"><i class="fas fa-chevron-left"></i></button>`;
+            }
+            
             for (let i = 1; i <= totalPages; i++) {
-                if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
-                    paginationHTML += `
-                        <button onclick="changePage(${i})" ${i === currentPage ? 'class="active"' : ''}>
-                            ${i}
-                        </button>
-                    `;
+                if (i === currentPage || i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+                    html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
                 } else if (i === currentPage - 2 || i === currentPage + 2) {
-                    paginationHTML += '<span>...</span>';
+                    html += `<span class="page-btn">...</span>`;
                 }
             }
-
-            paginationHTML += `
-                <button onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
-                    Siguiente ›
-                </button>
-            `;
-
-            pagination.innerHTML = paginationHTML;
-        }
-
-        function changePage(page) {
-            const totalPages = Math.ceil(filteredData.length / itemsPerPage);
-            if (page >= 1 && page <= totalPages) {
-                currentPage = page;
-                renderTable();
-            }
-        }
-
-        function sortTable(column) {
-            const columns = ['id', 'date', 'mesa', 'product', 'employee', 'quantity', 'total', 'status'];
-            const columnKey = columns[column];
-
-            if (sortColumn === column) {
-                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-            } else {
-                sortColumn = column;
-                sortDirection = 'asc';
-            }
-
-            filteredData.sort((a, b) => {
-                let aVal = a[columnKey];
-                let bVal = b[columnKey];
-
-                if (columnKey === 'date') {
-                    aVal = new Date(aVal);
-                    bVal = new Date(bVal);
-                } else if (columnKey === 'total' || columnKey === 'quantity') {
-                    aVal = Number(aVal);
-                    bVal = Number(bVal);
-                } else {
-                    aVal = String(aVal).toLowerCase();
-                    bVal = String(bVal).toLowerCase();
-                }
-
-                if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-                if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-                return 0;
-            });
-
-            currentPage = 1;
-            renderTable();
-        }
-
-        function showReport(period) {
-            currentReport = period;
-            document.querySelectorAll('.report-card').forEach(card => {
-                card.classList.remove('active');
-            });
-            event.target.closest('.report-card').classList.add('active');
             
-            drawChart();
-        }
-
-        function updateReports() {
-            const today = new Date();
-            const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-            const weekStart = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-            const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-
-            const dailySales = filteredData
-                .filter(sale => new Date(sale.date).toDateString() === today.toDateString())
-                .reduce((sum, sale) => sum + sale.total, 0);
-
-            const weeklySales = filteredData
-                .filter(sale => new Date(sale.date) >= weekStart)
-                .reduce((sum, sale) => sum + sale.total, 0);
-
-            const monthlySales = filteredData
-                .filter(sale => new Date(sale.date) >= monthStart)
-                .reduce((sum, sale) => sum + sale.total, 0);
-
-            document.getElementById('dailySales').textContent = `${dailySales.toFixed(2)}`;
-            document.getElementById('weeklySales').textContent = `${weeklySales.toFixed(2)}`;
-            document.getElementById('monthlySales').textContent = `${monthlySales.toFixed(2)}`;
-        }
-
-        function drawChart() {
-            const canvas = document.getElementById('salesChart');
-            const ctx = canvas.getContext('2d');
-            
-            // Limpiar canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            let data = [];
-            let labels = [];
-            let title = '';
-
-            if (currentReport === 'daily') {
-                title = '📈 Ventas Diarias - Últimos 7 días';
-                for (let i = 6; i >= 0; i--) {
-                    const date = new Date();
-                    date.setDate(date.getDate() - i);
-                    const dateStr = date.toISOString().split('T')[0];
-                    const daySum = filteredData
-                        .filter(sale => sale.date === dateStr)
-                        .reduce((sum, sale) => sum + sale.total, 0);
-                    
-                    data.push(daySum);
-                    labels.push(date.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' }));
-                }
-            } else if (currentReport === 'weekly') {
-                title = '📈 Ventas Semanales - Últimas 4 semanas';
-                for (let i = 3; i >= 0; i--) {
-                    const endDate = new Date();
-                    endDate.setDate(endDate.getDate() - (i * 7));
-                    const startDate = new Date(endDate);
-                    startDate.setDate(startDate.getDate() - 6);
-                    
-                    const weekSum = filteredData
-                        .filter(sale => {
-                            const saleDate = new Date(sale.date);
-                            return saleDate >= startDate && saleDate <= endDate;
-                        })
-                        .reduce((sum, sale) => sum + sale.total, 0);
-                    
-                    data.push(weekSum);
-                    labels.push(`Sem ${4-i}`);
-                }
-            } else if (currentReport === 'monthly') {
-                title = '📈 Ventas Mensuales - Últimos 6 meses';
-                for (let i = 5; i >= 0; i--) {
-                    const date = new Date();
-                    date.setMonth(date.getMonth() - i);
-                    const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
-                    const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-                    
-                    const monthSum = filteredData
-                        .filter(sale => {
-                            const saleDate = new Date(sale.date);
-                            return saleDate >= monthStart && saleDate <= monthEnd;
-                        })
-                        .reduce((sum, sale) => sum + sale.total, 0);
-                    
-                    data.push(monthSum);
-                    labels.push(date.toLocaleDateString('es-ES', { month: 'short' }));
-                }
+            if (currentPage < totalPages) {
+                html += `<button class="page-btn" onclick="changePage(${currentPage + 1})"><i class="fas fa-chevron-right"></i></button>`;
             }
-
-            document.getElementById('chartTitle').textContent = title;
-
-            // Configuración del gráfico
-            const padding = 50;
-            const chartWidth = canvas.width - (padding * 2);
-            const chartHeight = canvas.height - (padding * 2);
-            const maxValue = Math.max(...data) || 100;
-            const barWidth = chartWidth / data.length;
-
-            // Fondo del gráfico
-            ctx.fillStyle = '#2A2A2A';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Dibujar barras
-            data.forEach((value, index) => {
-                const barHeight = (value / maxValue) * chartHeight;
-                const x = padding + (index * barWidth) + (barWidth * 0.1);
-                const y = canvas.height - padding - barHeight;
-                const width = barWidth * 0.8;
-
-                // Gradiente para las barras
-                const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
-                gradient.addColorStop(0, '#FF6B35');
-                gradient.addColorStop(0.5, '#F7931E');
-                gradient.addColorStop(1, '#FFD23F');
-
-                ctx.fillStyle = gradient;
-                ctx.fillRect(x, y, width, barHeight);
-
-                // Valor en la parte superior de la barra
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = '12px Segoe UI';
-                ctx.textAlign = 'center';
-                ctx.fillText(`${value.toFixed(0)}`, x + width/2, y - 5);
-
-                // Etiqueta en el eje X
-                ctx.fillStyle = '#CCCCCC';
-                ctx.font = '11px Segoe UI';
-                ctx.fillText(labels[index], x + width/2, canvas.height - padding + 20);
-            });
-
-            // Líneas de grilla horizontales
-            ctx.strokeStyle = '#444444';
-            ctx.lineWidth = 1;
-            for (let i = 0; i <= 5; i++) {
-                const y = padding + (chartHeight / 5) * i;
-                ctx.beginPath();
-                ctx.moveTo(padding, y);
-                ctx.lineTo(padding + chartWidth, y);
-                ctx.stroke();
-
-                // Etiquetas del eje Y
-                const value = maxValue - (maxValue / 5) * i;
-                ctx.fillStyle = '#CCCCCC';
-                ctx.font = '10px Segoe UI';
-                ctx.textAlign = 'right';
-                ctx.fillText(`${value.toFixed(0)}`, padding - 10, y + 3);
-            }
-        }
-
-        function exportData() {
-            // Crear CSV
-            const headers = ['ID Orden', 'Fecha', 'Mesa', 'Producto', 'Bartender', 'Cantidad', 'Total', 'Estado'];
-            const csvContent = [
-                headers.join(','),
-                ...filteredData.map(sale => [
-                    sale.id,
-                    sale.date,
-                    sale.mesa,
-                    `"${sale.product}"`,
-                    `"${sale.employee}"`,
-                    sale.quantity,
-                    sale.total,
-                    sale.status
-                ].join(','))
-            ].join('\n');
-
-            // Descargar archivo
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', `ventas_container_bar_${new Date().toISOString().split('T')[0]}.csv`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            // Mostrar mensaje de éxito
-            alert('📊 Datos exportados exitosamente!');
-        }
-
-        function refreshData() {
-            const loading = document.getElementById('loading');
-            loading.classList.add('show');
             
-            // Simular carga de datos
-            setTimeout(() => {
-                loading.classList.remove('show');
-                renderTable();
-                updateReports();
-                drawChart();
-                alert('🔄 Datos actualizados correctamente!');
-            }, 1000);
-        }
+            pagination.innerHTML = html;
+        };
 
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('es-ES', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            });
-        }
+        const changePage = page => {
+            currentPage = page;
+            renderSalesTable();
+            renderPagination();
+        };
 
-        function getStatusText(status) {
-            const statusMap = {
-                'completed': 'Servida',
-                'pending': 'Preparando',
-                'cancelled': 'Cancelada'
+        const fetchData = (action, data, callback) => {
+            const formData = new FormData();
+            formData.append('accion', action);
+            Object.entries(data || {}).forEach(([key, value]) => value && formData.append(key, value));
+
+            fetch(window.location.href, { method: 'POST', body: formData })
+                .then(response => {
+                    console.log('Response status:', response.status);
+                    console.log('Response headers:', response.headers.get('content-type'));
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    // Obtener el texto de la respuesta primero
+                    return response.text();
+                })
+                .then(text => {
+                    console.log('Response text:', text.substring(0, 500)); // Log primeros 500 caracteres
+                    
+                    try {
+                        const data = JSON.parse(text);
+                        callback(data);
+                    } catch (parseError) {
+                        console.error('JSON Parse Error:', parseError);
+                        console.error('Response text:', text);
+                        throw new Error('La respuesta no es JSON válido. Respuesta: ' + text.substring(0, 200));
+                    }
+                })
+                .catch(error => {
+                    console.error('Fetch Error:', error);
+                    showAlert('Error de conexión: ' + error.message, 'error');
+                });
+        };
+
+        const filterSales = () => {
+            const data = {
+                fechaDesde: document.getElementById('dateFrom').value,
+                fechaHasta: document.getElementById('dateTo').value,
+                estado: document.getElementById('statusFilter').value,
+                busqueda: document.getElementById('searchInput').value
             };
-            return statusMap[status] || status;
-        }
 
-        // Eventos de teclado para filtros rápidos
-        document.addEventListener('keydown', function(e) {
-            if (e.ctrlKey || e.metaKey) {
-                switch(e.key) {
-                    case 'f':
-                        e.preventDefault();
-                        document.getElementById('product').focus();
-                        break;
-                    case 'e':
-                        e.preventDefault();
-                        exportData();
-                        break;
-                    case 'r':
-                        e.preventDefault();
-                        refreshData();
-                        break;
+            fetchData('obtenerVentas', data, response => {
+                if (response.success) {
+                    salesData = response.ventas || [];
+                    filteredSales = [...salesData];
+                    currentPage = 1;
+                    updateStats(response.estadisticas || {});
+                    renderSalesTable();
+                    renderPagination();
+                    showAlert(`Se encontraron ${filteredSales.length} ventas`, 'success');
+                } else {
+                    showAlert(response.mensaje || 'Error al filtrar ventas', 'error');
                 }
+            });
+        };
+
+        const viewSaleDetails = saleId => {
+            if (!saleId) {
+                showAlert('ID de venta no válido', 'error');
+                return;
             }
+
+            fetchData('obtenerDetalle', { idVenta: saleId }, response => {
+                if (response.success && response.detalle?.length) {
+                    const sale = response.detalle[0];
+                    const modal = document.getElementById('saleModal');
+                    const details = document.getElementById('saleDetails');
+                    
+                    const productsHTML = response.detalle.map(product => `
+                        <div class="detail-row">
+                            <span>${product.nombre_producto || 'Producto'} x${product.cantidad || 0}</span>
+                            <span>${formatCurrency(product.subtotal || 0)}</span>
+                        </div>
+                    `).join('');
+
+                    details.innerHTML = `
+                        <div class="detail-row"><span><strong>ID Venta:</strong></span><span>#${sale.id_venta || 'N/A'}</span></div>
+                        <div class="detail-row"><span><strong>Fecha:</strong></span><span>${formatDate(sale.fecha_venta || '')}</span></div>
+                        <div class="detail-row"><span><strong>Mesa:</strong></span><span>${sale.numero_mesa || 'N/A'}</span></div>
+                        <div class="detail-row"><span><strong>Mesero:</strong></span><span>${sale.mesero || 'N/A'}</span></div>
+                        <div class="detail-row"><span><strong>Estado:</strong></span><span class="status ${sale.estado || 'pendiente'}">${sale.estado || 'pendiente'}</span></div>
+                        <div style="margin: 20px 0; padding: 15px 0; border-top: 2px solid var(--gray); border-bottom: 2px solid var(--gray);">
+                            <h4 style="color: var(--secondary); margin-bottom: 15px;">Productos:</h4>
+                            ${productsHTML}
+                        </div>
+                        <div class="detail-row"><span><strong>TOTAL:</strong></span><span><strong>${formatCurrency(sale.total || 0)}</strong></span></div>
+                    `;
+                    
+                    modal.style.display = 'block';
+                } else {
+                    showAlert(response.mensaje || 'Error al obtener detalles de la venta', 'error');
+                }
+            });
+        };
+
+        const closeSaleModal = () => document.getElementById('saleModal').style.display = 'none';
+
+        const updateSaleStatus = (saleId, newStatus) => {
+            if (!saleId || !newStatus) {
+                showAlert('Datos incompletos', 'error');
+                return;
+            }
+
+            fetchData('actualizarEstado', { idVenta: saleId, nuevoEstado: newStatus }, response => {
+                if (response.success) {
+                    showAlert(response.mensaje || 'Estado actualizado correctamente', 'success');
+                    filterSales();
+                } else {
+                    showAlert(response.mensaje || 'Error al actualizar estado', 'error');
+                }
+            });
+        };
+
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', () => {
+            renderSalesTable();
+            renderPagination();
         });
 
+        // Cerrar modal con ESC
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeSaleModal();
+        });
+
+        // Cerrar modal al hacer clic fuera
+        window.onclick = e => {
+            if (e.target === document.getElementById('saleModal')) closeSaleModal();
+        };
     </script>
 </body>
 </html>
